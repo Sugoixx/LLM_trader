@@ -22,6 +22,7 @@ from .position_monitor import PositionMonitor, TrailingStopState, PartialCloseSt
 
 if TYPE_CHECKING:
     from src.config.protocol import ConfigProtocol
+    from src.contracts.decision_gate_contract import DecisionGateProtocol
     from src.trading.trading_strategy import TradingStrategy
     from src.trading.order_executor import OrderExecutorProtocol
 
@@ -41,11 +42,13 @@ class ExecutionEngine:
         price_stream: PriceStream,
         position_monitor: PositionMonitor,
         trading_strategy: "TradingStrategy",
+        decision_gate: Optional["DecisionGateProtocol"] = None,
     ):
         self.logger = logger
         self.config = config
         self.signal_bus = signal_bus
         self.price_stream = price_stream
+        self.gate = decision_gate
         # Multi-slot monitors: the injected monitor becomes the 'ai' slot;
         # the 'fast' slot is lazily created on-demand (same deps, source tag).
         self.monitor = position_monitor  # legacy alias, treated as 'ai'
@@ -171,12 +174,27 @@ class ExecutionEngine:
             signal.confidence, signal.rating,
         )
 
+        # ── DecisionGate validation firewall ──────────────────────────
+        if self.gate is not None:
+            verdict = await self.gate.evaluate(signal)
+            if not verdict.approved:
+                self.logger.warning(
+                    "[Engine] Signal REJECTED by DecisionGate: %s",
+                    verdict.rejections,
+                )
+                return
+            # Use the (possibly auto-corrected) signal from the verdict
+            signal = verdict.signal
+
         if signal.signal_type == SignalType.OPEN:
             # Layer 1 opened a new position — register it for monitoring
             src = getattr(signal, "source", "ai") or "ai"
             pos = self.strategy.positions.get(src)
             if pos:
                 self._register_position(src, pos)
+                # Track trade open time for gate rate-limiting
+                if self.gate is not None:
+                    self.gate.record_trade_opened()
 
         elif signal.signal_type == SignalType.CLOSE:
             # Layer 1 requested a close — unregister the target slot

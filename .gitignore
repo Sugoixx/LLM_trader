@@ -54,3 +54,4 @@ keys.env
 *.env
 *.ps1
 node_modules/
+graphify-out/cache/

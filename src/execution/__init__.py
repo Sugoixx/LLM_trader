@@ -8,6 +8,7 @@ from .signal_bus import SignalBus, Signal, SignalType
 from .price_stream import PriceStream
 from .position_monitor import PositionMonitor
 from .execution_engine import ExecutionEngine
+from .decision_gate import DecisionGate
 
 __all__ = [
     "SignalBus",
@@ -16,4 +17,5 @@ __all__ = [
     "PriceStream",
     "PositionMonitor",
     "ExecutionEngine",
+    "DecisionGate",
 ]
