@@ -1,0 +1,285 @@
+"""
+Config Protocol - Interface for configuration management.
+
+Defines the contract for configuration access without requiring concrete Config import.
+Prevents circular dependencies by using typing.Protocol.
+"""
+
+from typing import Any, Dict, Protocol
+
+
+class ConfigProtocol(Protocol):
+    """Protocol defining the interface for configuration management.
+
+    All configuration properties and methods must be defined here.
+    Implementations must provide all these members to satisfy the Protocol.
+    """
+
+
+
+    @property
+    def BOT_TOKEN_DISCORD(self) -> str | None: ...
+
+    @property
+    def GUILD_ID_DISCORD(self) -> int | None: ...
+
+    @property
+    def MAIN_CHANNEL_ID(self) -> int | None: ...
+
+    @property
+    def TEMPORARY_CHANNEL_ID_DISCORD(self) -> int | None: ...
+
+    @property
+    def OPENROUTER_API_KEY(self) -> str | None: ...
+
+    @property
+    def GOOGLE_STUDIO_API_KEY(self) -> str | None: ...
+
+    @property
+    def GOOGLE_STUDIO_PAID_API_KEY(self) -> str | None: ...
+
+    @property
+    def CRYPTOCOMPARE_API_KEY(self) -> str | None: ...
+
+    @property
+    def BLOCKRUN_WALLET_KEY(self) -> str | None: ...
+
+    @property
+    def ADMIN_USER_IDS(self) -> list[int]: ...
+
+
+
+    @property
+    def PROVIDER(self) -> str: ...
+
+    @property
+    def LM_STUDIO_BASE_URL(self) -> str: ...
+
+    @property
+    def LM_STUDIO_MODEL(self) -> str: ...
+
+    @property
+    def LM_STUDIO_STREAMING(self) -> bool: ...
+
+    @property
+    def OPENROUTER_BASE_URL(self) -> str: ...
+
+    @property
+    def OPENROUTER_BASE_MODEL(self) -> str: ...
+
+    @property
+    def OPENROUTER_FALLBACK_MODEL(self) -> str: ...
+
+    @property
+    def GOOGLE_STUDIO_MODEL(self) -> str: ...
+
+    @property
+    def BLOCKRUN_BASE_URL(self) -> str: ...
+
+    @property
+    def BLOCKRUN_MODEL(self) -> str: ...
+
+
+
+    @property
+    def LOGGER_DEBUG(self) -> bool: ...
+
+    @property
+    def TIMEFRAME(self) -> str: ...
+
+    @property
+    def ANALYSIS_COOLDOWN_MINUTES(self) -> int: ...
+
+    @property
+    def SKIP_LLM_WHEN_MARKET_CLOSED(self) -> bool: ...
+
+    @property
+    def PREOPEN_ANALYSIS_MINUTES(self) -> int: ...
+
+    @property
+    def MT5_MARKET_STALE_TICK_SECONDS(self) -> int: ...
+
+    @property
+    def CANDLE_LIMIT(self) -> int: ...
+
+    @property
+    def AI_CHART_CANDLE_LIMIT(self) -> int: ...
+
+    @property
+    def INCLUDE_COIN_DESCRIPTION(self) -> bool: ...
+
+
+
+    @property
+    def DEBUG_SAVE_CHARTS(self) -> bool: ...
+
+    @property
+    def DEBUG_CHART_SAVE_PATH(self) -> str: ...
+
+
+
+    @property
+    def LOG_DIR(self) -> str: ...
+
+    @property
+    def DATA_DIR(self) -> str: ...
+
+
+
+    @property
+    def FILE_MESSAGE_EXPIRY(self) -> int: ...
+
+
+
+    @property
+    def RAG_UPDATE_INTERVAL_HOURS(self) -> int: ...
+
+    @property
+    def RAG_CATEGORIES_UPDATE_INTERVAL_HOURS(self) -> int: ...
+
+    @property
+    def RAG_COINGECKO_UPDATE_INTERVAL_HOURS(self) -> int: ...
+
+    @property
+    def RAG_DEFILLAMA_UPDATE_INTERVAL_HOURS(self) -> float: ...
+
+    @property
+    def RAG_COINGECKO_GLOBAL_API_URL(self) -> str: ...
+
+    @property
+    def RAG_ARTICLE_MAX_TOKENS(self) -> int: ...
+
+    @property
+    def RAG_DENSITY_PENALTY_THRESHOLD(self) -> int: ...
+
+    @property
+    def RAG_DENSITY_BOOST_THRESHOLD(self) -> int: ...
+
+    @property
+    def RAG_DENSITY_PENALTY_MULTIPLIER(self) -> float: ...
+
+    @property
+    def RAG_DENSITY_BOOST_MULTIPLIER(self) -> float: ...
+
+    @property
+    def RAG_COOCCURRENCE_MULTIPLIER(self) -> float: ...
+
+    RAG_NEWS_API_URL: str
+    RAG_NEWS_FILTER_SOURCES: bool
+    RAG_NEWS_ALLOWED_FEEDS: list[str] | None
+    RAG_CATEGORIES_API_URL: str
+    RAG_PRICE_API_URL: str
+
+    # Demo Trading
+    @property
+    def TRANSACTION_FEE_PERCENT(self) -> float: ...
+
+    @property
+    def QUOTE_CURRENCY(self) -> str: ...
+
+    @property
+    def CRYPTO_PAIR(self) -> str: ...
+
+    @property
+    def SUPPORTED_EXCHANGES(self) -> list[str]: ...
+
+    @property
+    def MARKET_REFRESH_HOURS(self) -> int: ...
+
+    # Debate Configuration
+    @property
+    def DEBATE_ENABLED(self) -> bool: ...
+
+    @property
+    def DEBATE_USE_QUICK_MODEL(self) -> bool: ...
+
+    @property
+    def DEBATE_SKIP_FOR_HOLD(self) -> bool: ...
+
+    # Backtest Configuration
+    @property
+    def BACKTEST_INITIAL_CAPITAL(self) -> float: ...
+
+    # Execution Engine (Layer 2) Configuration
+    @property
+    def EXECUTION_ENGINE_ENABLED(self) -> bool: ...
+
+    @property
+    def EXECUTION_TRAILING_ENABLED(self) -> bool: ...
+
+    @property
+    def EXECUTION_TRAILING_ATR_MULT(self) -> float: ...
+
+    @property
+    def EXECUTION_TRAILING_BREAKEVEN(self) -> bool: ...
+
+    @property
+    def EXECUTION_PARTIAL_ENABLED(self) -> bool: ...
+
+    @property
+    def EXECUTION_PARTIAL_TARGETS(self) -> list: ...
+
+    # Live Trading Configuration
+    @property
+    def LIVE_TRADING_ENABLED(self) -> bool: ...
+
+    @property
+    def LIVE_EXCHANGE(self) -> str: ...
+
+    @property
+    def LIVE_ORDER_TYPE(self) -> str: ...
+
+    @property
+    def LIVE_MAX_ORDER_USD(self) -> float: ...
+
+    @property
+    def LIVE_MAX_ORDER_USD_AI(self) -> float: ...
+
+    @property
+    def LIVE_MAX_ORDER_USD_FAST(self) -> float: ...
+
+    @property
+    def DOUBLE_TRADE_ENABLED(self) -> bool: ...
+
+    @property
+    def MAX_MIN_LOT_MARGIN_PCT(self) -> float: ...
+
+    @property
+    def LIVE_CONFIRM_ORDERS(self) -> bool: ...
+
+    @property
+    def BINANCE_API_KEY(self) -> str | None: ...
+
+    @property
+    def BINANCE_API_SECRET(self) -> str | None: ...
+
+    # MT5 Configuration
+    @property
+    def MT5_ENABLED(self) -> bool: ...
+
+    @property
+    def MT5_LOGIN(self) -> str | None: ...
+
+    @property
+    def MT5_PASSWORD(self) -> str | None: ...
+
+    @property
+    def MT5_SERVER(self) -> str | None: ...
+
+    @property
+    def MT5_TERMINAL_PATH(self) -> str | None: ...
+
+    @property
+    def ASSET_CLASS(self) -> str: ...
+
+
+
+    def get_env(self, key: str, default: Any = None) -> Any: ...
+
+    def get_config(self, section: str, key: str, default: Any = None) -> Any: ...
+
+    def get_section(self, section: str) -> Dict[str, Any]: ...
+
+    def get_model_config(self, model_name: str, overrides: Dict[str, Any] | None = None) -> Dict[str, Any]: ...
+
+    def reload(self) -> None: ...

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semantic Signal LLM</title>
+    <meta name="description" content="Semantic Signal LLM Dashboard for Crypto Trading Neural Engine">
+    <meta property="og:title" content="Semantic Signal LLM">
+    <meta property="og:description" content="Semantic Signal LLM Dashboard for Crypto Trading Neural Engine">
+    <link rel="stylesheet" href="css/style.css?v=6.6">
+    <link rel="stylesheet" href="css/symbol_picker.css?v=6.6">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <a href="#content-area" class="skip-link">Skip to main content</a>
+    <div id="app-container">
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+                    <div>
+                        <h1>SEMANTIC<span class="highlight">SIGNAL</span> LLM</h1>
+                        <div class="subtitle">LLM-POWERED NEURAL ENGINE</div>
+                    </div>
+                </div>
+                <button id="mobile-menu-close" class="icon-btn-xs mobile-close-btn" aria-label="Close menu" aria-expanded="true" aria-controls="sidebar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+
+            <!-- Global Fast Trading Mode badge — visible on all tabs -->
+            <div id="fast-global-badge" class="fast-global-badge" style="display:none;" aria-live="polite">
+                <span class="fast-global-icon">&#x26A1;</span>
+                <span>FAST TRADING ACTIVE</span>
+            </div>
+
+            <!-- Active symbol pill — click to change trading pair -->
+            <button id="symbol-pill" type="button" title="Changer de marché">
+                <span class="symbol-pill-icon" aria-hidden="true">⇄</span>
+                <span class="symbol-pill-label">—</span>
+                <span class="symbol-pill-caret" aria-hidden="true">▾</span>
+            </button>
+
+            <div class="sidebar-nav" role="tablist" aria-label="Dashboard Navigation">
+                <span class="tab-btn active" data-target="tab-overview" role="tab" aria-selected="true" aria-controls="tab-overview" id="nav-overview" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span> Overview
+                </span>
+                <span class="tab-btn" data-target="tab-brain" role="tab" aria-selected="false" aria-controls="tab-brain" id="nav-brain" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span> Brain Activity
+                </span>
+                <span class="tab-btn" data-target="tab-prompt" role="tab" aria-selected="false" aria-controls="tab-prompt" id="nav-prompt" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span> Last Prompt
+                </span>
+                <span class="tab-btn" data-target="tab-response" role="tab" aria-selected="false" aria-controls="tab-response" id="nav-response" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span> Last Response
+                </span>
+                <span class="tab-btn" data-target="tab-stats" role="tab" aria-selected="false" aria-controls="tab-stats" id="nav-stats" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Statistics
+                </span>
+                <span class="tab-btn" data-target="tab-news" role="tab" aria-selected="false" aria-controls="tab-news" id="nav-news" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg></span> Latest News
+                </span>
+                <span class="tab-btn" data-target="tab-market" role="tab" aria-selected="false" aria-controls="tab-market" id="nav-market" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></span> Market Data
+                </span>
+                <span class="tab-btn" data-target="tab-algo" role="tab" aria-selected="false" aria-controls="tab-algo" id="nav-algo" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></span> Algo Strategies
+                </span>
+                <span class="tab-btn" data-target="tab-memory" role="tab" aria-selected="false" aria-controls="tab-memory" id="nav-memory" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></span> Memory Bank
+                </span>
+                <span class="tab-btn" data-target="tab-settings" role="tab" aria-selected="false" aria-controls="tab-settings" id="nav-settings" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings
+                </span>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="status-indicator" role="status" aria-live="polite">
+                    <div class="status-dot" aria-hidden="true"></div>
+                    <span id="connection-status">Connecting…</span>
+                </div>
+                <!-- Hidden legacy fields for main.js compatibility -->
+                <!-- Legacy fields removed. -->
+                <div class="next-update">
+                    <span class="label">Next Analysis</span>
+                    <span id="next-analysis" class="value">--:--</span>
+                </div>
+                
+                <div class="contact-list">
+                    <a href="mailto:contact@qrak.org" class="contact-item" aria-label="Email contact">
+                        <span class="icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></span>
+                        <span>contact@qrak.org</span>
+                    </a>
+                    <a href="https://github.com/qrak" target="_blank" rel="noopener noreferrer" class="contact-item" aria-label="GitHub profile">
+                        <span class="icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></span>
+                        <span>github.com/qrak</span>
+                    </a>
+                    <a href="https://discord.gg/ZC48aTTqR2" target="_blank" rel="noopener noreferrer" class="contact-item" aria-label="Discord server">
+                        <span class="icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                        <span>Discord Community</span>
+                    </a>
+                </div>
+            </div>
+        </aside>
+
+        <main id="content-area" tabindex="-1">
+            <!-- Mobile Header (visible only on mobile) -->
+            <div id="mobile-header">
+                <button id="mobile-menu-toggle" class="icon-btn-xs" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
+            </div>
+
+            <!-- Global Fast Trading banner — sticky top of content, all tabs -->
+            <div id="fast-global-banner" class="fast-global-banner" style="display:none;" role="status" aria-live="polite">
+                <span class="fast-banner-live">
+                    <span class="fast-banner-dot"></span>
+                    <span class="fast-banner-label">Fast Trading</span>
+                </span>
+                <span class="fast-banner-badge">ALGO</span>
+                <span class="fast-banner-desc">Executing on algo signals</span>
+                <button id="fast-banner-toggle" class="fast-banner-toggle" type="button" aria-expanded="false" aria-controls="fast-banner-inspector">
+                    Inspect Live Logic
+                </button>
+                <button id="fast-banner-clear" class="fast-banner-clear" type="button" title="Clear inspector history" style="display:none;">
+                    &#x1F5D1; Clear
+                </button>
+                <a class="fast-banner-cta" href="#" onclick="(function(){document.querySelector('[data-target=tab-algo]').click();return false;})();">
+                    View Algo Panel
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10L10 2M10 2H4M10 2v6"/></svg>
+                </a>
+            </div>
+            <div id="fast-banner-inspector" class="fast-banner-inspector" style="display:none;">
+                <div class="fast-banner-inspector-head">
+                    <div class="fast-banner-inspector-title">Live algo reasoning</div>
+                    <div id="fast-banner-inspector-summary" class="fast-banner-inspector-summary">Waiting for fast cycle…</div>
+                </div>
+                <div id="fast-banner-inspector-log" class="fast-banner-inspector-log">
+                    <div class="empty-state"><p>No fast diagnostics yet.</p></div>
+                </div>
+            </div>
+
+            <!-- Capital top-up alert banner — shown when risk manager refuses a trade -->
+            <div id="capital-alert-banner" class="capital-alert-banner" style="display:none;" role="alert" aria-live="assertive">
+                <span class="capital-alert-live">
+                    <span class="capital-alert-dot"></span>
+                    <span class="capital-alert-label">Capital Insuffisant</span>
+                </span>
+                <span class="capital-alert-badge" id="capital-alert-symbol">—</span>
+                <div class="capital-alert-body">
+                    <div class="capital-alert-headline" id="capital-alert-headline">
+                        Position sous le minimum broker
+                    </div>
+                    <div class="capital-alert-metrics">
+                        <span class="capital-alert-metric">
+                            <span class="cam-label">Recharger</span>
+                            <span class="cam-value cam-value-warn" id="capital-alert-topup">$0</span>
+                        </span>
+                        <span class="capital-alert-sep">→</span>
+                        <span class="capital-alert-metric">
+                            <span class="cam-label">Lot min</span>
+                            <span class="cam-value" id="capital-alert-lots">0</span>
+                        </span>
+                        <span class="capital-alert-metric">
+                            <span class="cam-label">Notionnel</span>
+                            <span class="cam-value" id="capital-alert-notional">$0</span>
+                        </span>
+                        <span class="capital-alert-metric">
+                            <span class="cam-label">Levier</span>
+                            <span class="cam-value" id="capital-alert-leverage">1x</span>
+                        </span>
+                        <span class="capital-alert-sep">⇒</span>
+                        <span class="capital-alert-metric">
+                            <span class="cam-label">TP</span>
+                            <span class="cam-value cam-value-gain" id="capital-alert-tp">+$0</span>
+                        </span>
+                        <span class="capital-alert-metric">
+                            <span class="cam-label">SL</span>
+                            <span class="cam-value cam-value-loss" id="capital-alert-sl">-$0</span>
+                        </span>
+                    </div>
+                </div>
+                <button id="capital-alert-dismiss" class="capital-alert-close" aria-label="Dismiss">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+
+            <!-- Tab: Overview -->
+            <div id="tab-overview" class="tab-content active" role="tabpanel" aria-labelledby="nav-overview">
+                <header class="tab-header">
+                    <h2>Live Dashboard</h2>
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span id="market-hours-badge" class="market-hours-badge" style="display: none;">Market Status</span>
+                        <label class="auto-trade-toggle" title="Enable/disable automatic order execution">
+                            <input type="checkbox" id="auto-trade-checkbox" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label" id="auto-trade-label">Auto-Trade ON</span>
+                        </label>
+                        <span id="last-updated" style="font-size: 12px; color: var(--text-muted);">Updated: --</span>
+                    </div>
+                </header>
+
+                <!-- Last AI Analysis Banner -->
+                <div id="ai-analysis-banner" class="ai-analysis-banner" style="display: none;">
+                    <div class="ai-banner-header">
+                        <span class="ai-banner-icon">🧠</span>
+                        <span class="ai-banner-title">Last AI Analysis</span>
+                        <span id="ai-banner-signal" class="ai-banner-signal"></span>
+                        <span id="ai-banner-confidence" class="ai-banner-confidence"></span>
+                        <span id="ai-banner-rating" class="ai-banner-rating"></span>
+                    </div>
+                    <div class="ai-banner-details">
+                        <span id="ai-banner-entry" class="ai-banner-detail" title="Entry Price"></span>
+                        <span id="ai-banner-sl" class="ai-banner-detail ai-banner-sl" title="Stop Loss"></span>
+                        <span id="ai-banner-tp" class="ai-banner-detail ai-banner-tp" title="Take Profit"></span>
+                        <span id="ai-banner-rr" class="ai-banner-detail" title="Risk/Reward Ratio"></span>
+                        <span id="ai-banner-size" class="ai-banner-detail" title="Position Size"></span>
+                        <span id="ai-banner-setup" class="ai-banner-detail ai-banner-setup" title="Setup Type"></span>
+                    </div>
+                    <div id="ai-banner-reasoning" class="ai-banner-reasoning"></div>
+                </div>
+
+                <!-- Manual Trading Controls -->
+                <div class="manual-trade-panel">
+                    <div id="manual-trade-open" class="manual-trade-group" style="display: flex;">
+                        <div class="manual-trade-inputs">
+                            <label>SL <input type="number" id="manual-sl" step="0.01" placeholder="Stop Loss" class="manual-input"></label>
+                            <label>TP <input type="number" id="manual-tp" step="0.01" placeholder="Take Profit" class="manual-input"></label>
+                            <label>Vol <input type="number" id="manual-volume" step="0.1" min="0.1" placeholder="Auto" class="manual-input manual-input-sm" title="Volume in lots (empty = auto-size)"></label>
+                        </div>
+                        <button id="btn-manual-buy" class="btn-manual-trade btn-buy" title="Open LONG position (AI will monitor)">BUY</button>
+                        <button id="btn-manual-sell" class="btn-manual-trade btn-sell" title="Open SHORT position (AI will monitor)">SELL</button>
+                    </div>
+                    <div id="manual-trade-close" class="manual-trade-group" style="display: none;">
+                        <span id="manual-pos-info" class="manual-pos-info"></span>
+                        <button id="btn-manual-close" class="btn-manual-trade btn-close" title="Close current position">CLOSE</button>
+                    </div>
+                    <button id="btn-manual-close-all" class="btn-manual-trade btn-close-all" title="Close ALL open broker positions">CLOSE ALL</button>
+                    <div id="manual-trade-feedback" class="manual-feedback" style="display: none;"></div>
+                </div>
+
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="label">Market Trend</div>
+                        <div class="value" id="overview-trend" aria-live="polite">--</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="label">Confidence</div>
+                        <div class="value highlight" id="overview-conf" aria-live="polite">--%</div>
+                        <div class="sub-label" id="overview-action" aria-live="polite">WAITING</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="label">Active Rules</div>
+                        <div class="value" id="overview-rules-count" aria-live="polite">0</div>
+                        <div class="sub-label" id="overview-rules-hint" style="font-size: 10px;">No rules learned yet</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="label">Session Cost</div>
+                        <div class="value" id="overview-cost" aria-live="polite">$0.00</div>
+
+                    </div>
+                </div>
+
+                <section id="panel-performance" class="panel full-height-panel">
+                    <div class="panel-header">
+                        <h3>Performance Metrics</h3>
+                        <div class="controls">
+                            <span id="stats-summary" class="stats-summary-text"><span class="spinner spinner-sm"></span> Loading stats…</span>
+
+                        </div>
+                    </div>
+                    <div id="performance-chart" class="chart-container"></div>
+                </section>
+            </div>
+
+            <!-- Tab: Brain Activity -->
+            <div id="tab-brain" class="tab-content" role="tabpanel" aria-labelledby="nav-brain">
+                <header class="tab-header">
+                    <h2>Neural Network State</h2>
+                </header>
+
+                <div class="stack-layout">
+                    <section id="panel-synapses" class="panel large-panel">
+                        <div class="panel-header">
+                            <h3>Synaptic Pathways</h3>
+                            <div class="legend">
+                                <span class="dot buy"></span> BUY
+                                <span class="dot close"></span> CLOSE
+                                <span class="dot update"></span> UPDATE
+                            </div>
+                        </div>
+                        <div id="synapse-network" class="network-container"></div>
+                    </section>
+                    
+                    <section id="panel-visuals" class="panel visual-panel">
+                        <div class="panel-header">
+                            <h3>Visual Cortex Input</h3>
+                            <div class="controls panel-toolbar panel-controls">
+
+                                <button class="toolbar-btn" id="btn-minimize-visuals" title="Minimize" aria-label="Minimize visual cortex input" aria-expanded="true" aria-controls="visual-container"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+                                <button class="toolbar-btn" id="btn-lightbox-visuals" title="Fullscreen" aria-label="Fullscreen chart" aria-haspopup="dialog" aria-controls="lightbox-overlay"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg></button>
+                            </div>
+                        </div>
+                        <div id="visual-container" class="visual-box">
+                            <img id="analysis-chart" src="" alt="No chart generated" width="800" height="450" style="display: none;">
+                            <span id="no-chart-msg">No visual data available</span>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- Tab: Last Prompt -->
+            <div id="tab-prompt" class="tab-content" role="tabpanel" aria-labelledby="nav-prompt">
+                <header class="tab-header">
+                    <h2>Last Prompt</h2>
+
+                </header>
+                <section class="panel full-height-panel">
+                    <div class="panel-header">
+                        <h3>Trading Context Sent to LLM</h3>
+                        <div class="controls">
+                            <span id="prompt-meta" class="meta-info"></span>
+                            <button id="btn-copy-prompt" class="copy-btn" aria-label="Copy prompt to clipboard"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
+                        </div>
+                    </div>
+                    <div id="prompt-viewer" class="discord-content">
+                        <div class="empty-state">
+                            <div class="spinner"></div>
+                            <div class="empty-state-text">Loading trading context…</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tab: Last Response -->
+            <div id="tab-response" class="tab-content" role="tabpanel" aria-labelledby="nav-response">
+                <header class="tab-header">
+                    <h2>Last Response</h2>
+
+                </header>
+                <section class="panel full-height-panel">
+                    <div class="panel-header">
+                        <h3>LLM Analysis Output</h3>
+                        <div class="controls">
+                            <span id="response-meta" class="meta-info"></span>
+                            <button id="btn-copy-response" class="copy-btn" aria-label="Copy response to clipboard"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
+                        </div>
+                    </div>
+                    <div id="response-viewer" class="discord-content">
+                        <div class="empty-state">
+                            <div class="spinner"></div>
+                            <div class="empty-state-text">Loading analysis output…</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tab: Statistics -->
+            <div id="tab-stats" class="tab-content" role="tabpanel" aria-labelledby="nav-stats">
+                <header class="tab-header">
+                    <h2>Trading Statistics</h2>
+
+                </header>
+                <div id="statistics-content">
+                    <div class="empty-state">
+                        <div class="spinner"></div>
+                        <div class="empty-state-text">Loading trading statistics…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Latest News -->
+            <div id="tab-news" class="tab-content" role="tabpanel" aria-labelledby="nav-news">
+                <header class="tab-header">
+                    <h2 id="news-panel-title">Latest News</h2>
+
+                </header>
+                <div id="news-content">
+                    <div class="empty-state">
+                        <div class="spinner"></div>
+                        <div class="empty-state-text">Loading latest news…</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Market Data -->
+            <div id="tab-market" class="tab-content" role="tabpanel" aria-labelledby="nav-market">
+                <header class="tab-header">
+                    <h2>Active Market Position</h2>
+
+                </header>
+                
+                <section id="panel-position" class="panel">
+                    <div class="panel-header">
+                        <h3>Position Details</h3>
+                    </div>
+                    <div id="position-content" class="position-details-container">
+                        <div class="no-position">
+                            <span class="no-position-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>
+                            <span>No active positions</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tab: Algo Strategies -->
+            <div id="tab-algo" class="tab-content" role="tabpanel" aria-labelledby="nav-algo">
+                <header class="tab-header">
+                    <h2>
+                        Algo Strategy Signals
+                        <span id="fast-trade-indicator" class="fast-trade-active-badge" style="display:none;" title="Fast Trading Mode active"><span class="fast-badge-dot"></span>ALGO</span>
+                    </h2>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span id="algo-last-updated" style="font-size: 12px; color: var(--text-muted);">--</span>
+                        <label class="auto-trade-toggle fast-trade-toggle" title="Enable to trade on algo signals; AI keeps running for correction">
+                            <input type="checkbox" id="fast-trade-checkbox">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label" id="fast-trade-label">Fast Trade OFF</span>
+                        </label>
+                    </div>
+                </header>
+
+                <section id="panel-algo-regime" class="panel">
+                    <div class="panel-header"><h3>Market Regime</h3></div>
+                    <div id="algo-regime-content" class="algo-regime-bar">
+                        <div class="empty-state"><div class="spinner"></div><p>Waiting for analysis cycle…</p></div>
+                    </div>
+                </section>
+
+                <section id="panel-algo-signals" class="panel">
+                    <div class="panel-header"><h3>Strategy Signals</h3></div>
+                    <div id="algo-signals-table" class="algo-signals-wrap">
+                        <div class="empty-state"><p>No signals yet.</p></div>
+                    </div>
+                </section>
+
+                <section id="panel-algo-consensus" class="panel">
+                    <div class="panel-header"><h3>Consensus</h3></div>
+                    <div id="algo-consensus-content" class="algo-consensus">
+                        <div class="empty-state"><p>--</p></div>
+                    </div>
+                </section>
+
+                <section id="panel-fast-guard" class="panel">
+                    <div class="panel-header">
+                        <h3>Fast Trading Safety Guards</h3>
+                        <span class="panel-subtitle">Protection vs. overtrading and drawdowns</span>
+                    </div>
+                    <div id="fast-guard-content" class="fast-guard">
+                        <div class="empty-state"><p>Loading guard state…</p></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tab: Memory Bank -->
+            <div id="tab-memory" class="tab-content" role="tabpanel" aria-labelledby="nav-memory">
+                <header class="tab-header">
+                    <h2>Vector Experience Database</h2>
+                </header>
+
+                <section id="panel-vectors" class="panel full-height-panel">
+                    <div id="vector-content">
+                        <div class="empty-state">
+                            <div class="spinner"></div>
+                            <div class="empty-state-text">Loading vector database…</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tab: Settings -->
+            <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="nav-settings">
+                <header class="tab-header">
+                    <h2>Trading Settings</h2>
+                    <span id="settings-feedback" class="settings-feedback" style="display:none;"></span>
+                </header>
+
+                <div id="settings-panel-content" class="settings-grid">
+                    <!-- Style Presets -->
+                    <section class="settings-section">
+                        <h3 class="settings-section-title">Trading Style</h3>
+                        <div class="preset-row">
+                            <button class="preset-btn preset-aggressive" data-preset="aggressive" title="Mode agressif : trailing serré, pas de débat IA, exécution rapide. Pour les marchés volatils avec des tendances claires.">
+                                <span class="preset-icon">&#9889;</span>
+                                <span class="preset-label">Aggressive</span>
+                                <span class="preset-desc">Tight trailing, no debate, max speed</span>
+                            </button>
+                            <button class="preset-btn preset-moderate" data-preset="moderate" title="Mode équilibré : trailing modéré, débat IA activé, bon ratio risque/rendement. Recommandé pour la plupart des conditions.">
+                                <span class="preset-icon">&#9878;</span>
+                                <span class="preset-label">Moderate</span>
+                                <span class="preset-desc">Balanced risk/reward, debate ON</span>
+                            </button>
+                            <button class="preset-btn preset-conservative" data-preset="conservative" title="Mode prudent : take profit partiel, débat complet, taille de position réduite. Pour les marchés incertains ou latéraux.">
+                                <span class="preset-icon">&#128737;</span>
+                                <span class="preset-label">Conservative</span>
+                                <span class="preset-desc">Partial TP, full debate, lower caps</span>
+                            </button>
+                        </div>
+                    </section>
+
+                    <!-- Timeframe & Analysis -->
+                    <section class="settings-section">
+                        <h3 class="settings-section-title">Timeframe &amp; Analysis</h3>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-timeframe" title="Intervalle des bougies pour l'analyse technique (ex: 5m, 15m, 30m, 1h, 4h). Détermine la fréquence d'analyse.">Timeframe</label>
+                            <select id="set-timeframe" class="settings-select"><option>30m</option></select>
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-cooldown" title="Temps minimum (en minutes) entre deux analyses IA. 0 = analyse à chaque bougie. Augmenter pour réduire les coûts API.">Analysis Cooldown (min)</label>
+                            <input id="set-cooldown" type="number" min="0" max="120" step="1" class="settings-input" value="0">
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-candles" title="Nombre de bougies historiques utilisées pour le calcul des indicateurs techniques (RSI, MACD, ATR…). Plus = plus de contexte, mais plus lent.">Candle Limit (calc)</label>
+                            <input id="set-candles" type="number" min="50" max="2000" step="1" class="settings-input" value="999">
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-chart-candles" title="Nombre de bougies affichées sur le graphique envoyé à l'IA pour l'analyse visuelle. Plus = vue plus large, mais image plus dense.">Chart Candles (AI)</label>
+                            <input id="set-chart-candles" type="number" min="20" max="500" step="1" class="settings-input" value="125">
+                        </div>
+                    </section>
+
+                    <!-- Execution Engine -->
+                    <section class="settings-section">
+                        <h3 class="settings-section-title">Execution Engine</h3>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-trailing" title="Active le trailing stop : le SL suit le prix quand il monte (LONG) ou descend (SHORT), protégeant les gains en cours.">Trailing Stop</label>
+                            <label class="settings-toggle"><input id="set-trailing" type="checkbox" checked><span class="toggle-slider"></span></label>
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-atr-mult" title="Distance du trailing stop en multiples d'ATR. Plus bas = trailing serré (prend les profits tôt). Plus haut = laisse respirer le trade.">ATR Multiplier <span id="set-atr-mult-display" class="range-display">2.0</span></label>
+                            <input id="set-atr-mult" type="range" min="0.5" max="5" step="0.1" value="2.0" class="settings-range">
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-breakeven" title="Quand le premier take profit (TP1) est atteint, déplace le SL au prix d'entrée. Élimine le risque de perte sur le reste de la position.">Breakeven on TP1</label>
+                            <label class="settings-toggle"><input id="set-breakeven" type="checkbox" checked><span class="toggle-slider"></span></label>
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-partial" title="Ferme une partie de la position au TP1, laisse le reste courir vers TP2/TP3. Sécurise des gains tout en gardant du potentiel.">Partial Take Profit</label>
+                            <label class="settings-toggle"><input id="set-partial" type="checkbox"><span class="toggle-slider"></span></label>
+                        </div>
+                    </section>
+
+                    <!-- Debate -->
+                    <section class="settings-section">
+                        <h3 class="settings-section-title">AI Debate</h3>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-debate" title="Active le débat Bull vs Bear : une 2e analyse IA challenge la décision initiale. Réduit les biais de confirmation, mais double le coût API.">Bull/Bear Debate</label>
+                            <label class="settings-toggle"><input id="set-debate" type="checkbox" checked><span class="toggle-slider"></span></label>
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-debate-quick" title="Utilise un modèle IA plus rapide et moins cher pour le débat au lieu du modèle principal. Réduit le coût et la latence.">Quick Model</label>
+                            <label class="settings-toggle"><input id="set-debate-quick" type="checkbox" checked><span class="toggle-slider"></span></label>
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-debate-skip-hold" title="Si le signal initial est HOLD (ne rien faire), saute le débat. Économise un appel API quand il n'y a pas de trade à valider.">Skip for HOLD</label>
+                            <label class="settings-toggle"><input id="set-debate-skip-hold" type="checkbox" checked><span class="toggle-slider"></span></label>
+                        </div>
+                    </section>
+
+                    <!-- Risk & Safety -->
+                    <section class="settings-section">
+                        <h3 class="settings-section-title">Risk &amp; Safety</h3>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-max-order" title="Montant maximum en dollars par ordre. Sécurité qui empêche un trade trop gros même si l'IA le demande.">Max Order ($)</label>
+                            <input id="set-max-order" type="number" min="10" max="10000" step="10" class="settings-input" value="500">
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-confirm" title="Demande une confirmation manuelle (Y/N au clavier) avant chaque ordre live. Désactivé = exécution automatique immédiate.">Confirm Orders</label>
+                            <label class="settings-toggle"><input id="set-confirm" type="checkbox"><span class="toggle-slider"></span></label>
+                        </div>
+                    </section>
+
+                    <!-- AI Model -->
+                    <section class="settings-section">
+                        <h3 class="settings-section-title">AI Model</h3>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-temperature" title="Créativité de l'IA. 0 = déterministe (même réponse à chaque fois). 1+ = plus créatif mais moins prévisible. Recommandé : 0.5-0.8 pour le trading.">Temperature <span id="set-temperature-display" class="range-display">0.7</span></label>
+                            <input id="set-temperature" type="range" min="0" max="2" step="0.05" value="0.7" class="settings-range">
+                        </div>
+                        <div class="settings-range-labels">
+                            <span class="range-label-left">Deterministic</span>
+                            <span class="range-label-mid">Balanced</span>
+                            <span class="range-label-right">Creative</span>
+                        </div>
+                        <p class="settings-hint">0–0.3 = fiable, 0.5–0.8 = recommandé, 1+ = risqué</p>
+                        <div class="settings-row">
+                            <label class="settings-label" for="set-max-tokens" title="Nombre maximum de tokens (≈mots) dans la réponse de l'IA. Plus haut = réponses plus détaillées mais plus coûteuses. 32768 convient pour la plupart des modèles.">Max Tokens</label>
+                            <input id="set-max-tokens" type="number" min="256" max="65536" step="256" class="settings-input" value="32768">
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script type="module" src="main.js?v=6.6"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+# === Python runtime & build artifacts ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# === Virtual environment ===
+.venv/
+venv/
+env/
+
+# === IDE & editor ===
+.idea/
+.vscode/
+*.swp
+*.swo
+.devcontainer/
+.copilot/
+.claude/
+
+# === Sensitive & private data ===
+keys.env
+*.env
+config/config.ini
+
+# === Runtime data (generated, not source) ===
+data/
+cache/
+logs/
+
+# === Test artifacts ===
+.pytest_cache/
+.coverage
+htmlcov/
+*.future
+
+# === Node modules ===
+node_modules/
+
+# === Graphify output (avoid recursive scanning) ===
+graphify-out/
+
+# === OS files ===
+Thumbs.db
+.DS_Store
+
+# === Non-essential project files ===
+.git/
+img/
+data_template/
+*.ps1
+*.db
+*.log

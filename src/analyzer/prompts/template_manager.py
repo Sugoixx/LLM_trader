@@ -1,0 +1,548 @@
+"""
+Template management for prompt building system.
+Handles system prompts, response templates, and analysis steps for TRADING DECISIONS.
+"""
+
+import re
+from datetime import datetime, timezone
+from typing import Optional, Any, Dict
+
+from src.logger.logger import Logger
+
+
+class TemplateManager:
+    """Manages prompt templates, system prompts, and analysis steps for trading decisions."""
+
+    def __init__(self, config: Any, logger: Optional[Logger] = None, timeframe_validator: Any = None):
+        """Initialize the template manager.
+
+        Args:
+            config: Configuration module providing prompt defaults
+            logger: Optional logger instance for debugging
+            timeframe_validator: TimeframeValidator instance (injected)
+        """
+        self.logger = logger
+        self.config = config
+        self.timeframe_validator = timeframe_validator
+
+    @staticmethod
+    def _detect_asset_class(symbol: str) -> str:
+        """Detect asset class from symbol for prompt persona.
+
+        Returns a human-readable label like 'Crypto', 'Commodities',
+        'Forex', or 'Multi-Asset'.
+        """
+        upper = symbol.upper().replace("/", "")
+        # Commodity patterns (standard + Admirals/broker-specific names)
+        _COMMODITIES = {"XTIUSD", "XBRUSD", "XAUUSD", "XAGUSD", "XNGUSD",
+                        "WTIUSD", "OILUSD", "BRENTUSD", "GOLDUSD", "SILVERUSD", "NATGASUSD",
+                        "CRUDOIL", "BRENT", "GOLD", "SILVER", "NATGAS", "WTI", "OIL"}
+        if upper in _COMMODITIES or upper.startswith(("XTI", "XBR", "XAU", "XAG", "XNG", "CRUDE")):
+            return "Commodities"
+
+        # Major forex pairs
+        _FOREX_CURRENCIES = {"EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD", "SEK", "NOK", "DKK"}
+        base = upper[:3]
+        quote = upper[3:6] if len(upper) >= 6 else ""
+        if base in _FOREX_CURRENCIES or quote in _FOREX_CURRENCIES:
+            if base == "USD" or quote == "USD":
+                return "Forex"
+
+        # Indices
+        _INDICES = {"US500", "US30", "US100", "DE40", "UK100", "JP225", "SP500", "NAS100", "DAX40"}
+        if upper in _INDICES or any(upper.startswith(i) for i in ("US5", "US3", "US1", "DE4", "UK1", "JP2")):
+            return "Indices"
+
+        # Default to Crypto
+        return "Crypto"
+
+    def build_system_prompt(self, symbol: str, timeframe: str = "1h", previous_response: Optional[str] = None,
+                            performance_context: Optional[str] = None, brain_context: Optional[str] = None,
+                            last_analysis_time: Optional[str] = None,
+                            indicator_delta_alert: str = "",
+                            has_open_position: bool = True) -> str:
+        # pylint: disable=too-many-arguments
+        """Build the system prompt for trading decision AI.
+
+        Args:
+            symbol: Trading symbol (e.g., "BTC/USDT")
+            timeframe: Timeframe for analysis (e.g., "1h", "4h", "1d")
+            previous_response: Previous AI response for context continuity (JSON stripped)
+            performance_context: Recent trading history and performance metrics
+            brain_context: Distilled trading insights from closed trades
+            last_analysis_time: Formatted timestamp of last analysis (e.g., "2025-12-26 14:30:00")
+            indicator_delta_alert: Alert string when many indicators changed significantly
+            has_open_position: Whether a position is currently open. When False,
+                UPDATE/CLOSE signals are disallowed (only BUY/SELL/HOLD are valid).
+
+        Returns:
+            str: Formatted system prompt
+        """
+        asset_class = self._detect_asset_class(symbol)
+        allowed_signals = (
+            "BUY/SELL/HOLD/CLOSE/UPDATE" if has_open_position else "BUY/SELL/HOLD"
+        )
+        header_lines = [
+            f"You are an Institutional-Grade {asset_class} Trading Analyst managing {symbol} on {timeframe} timeframe.",
+            "Analyze technical indicators, price action, volume, patterns, provided chart if available, market sentiment, and news.",
+            f"Provide exactly ONE decision ({allowed_signals}) with entry, stop loss, and take profit level reasoning.",
+            "",
+            "## Analytical Framework",
+            "Follow the numbered **Analysis Steps** in the user prompt for internal reasoning.",
+            "Your written output MUST follow the **Response Format** sections exactly.",
+            "",
+        ]
+
+        if not has_open_position:
+            header_lines.extend([
+                "## POSITION STATE (HARD CONSTRAINT)",
+                "- **NO POSITION IS CURRENTLY OPEN.**",
+                "- Valid signals this cycle: **BUY / SELL / HOLD ONLY**.",
+                "- **DO NOT emit UPDATE** — there is no position to update. UPDATE is INVALID.",
+                "- **DO NOT emit CLOSE / CLOSE_LONG / CLOSE_SHORT** — there is no position to close. CLOSE is INVALID.",
+                "- If your analysis would suggest adjusting or closing a position, emit **HOLD** instead.",
+                "- If you see a directional edge, emit **BUY** or **SELL** with a full entry/SL/TP plan.",
+                "",
+            ])
+
+        if last_analysis_time:
+            header_lines.extend([
+                "## Temporal Context",
+                f"Last analysis: {last_analysis_time} UTC",
+                "",
+            ])
+
+        header_lines.extend([
+            "## Core Principles",
+            "- Indicators calculated on CLOSED CANDLES ONLY (no repaint). Current price is REAL-TIME (incomplete candle).",
+            "- STOP EXECUTION: This bot uses SOFT STOPS evaluated ONLY at candle CLOSE. Intra-candle wicks below SL do NOT trigger exits. Set SL at levels where a CLOSE below invalidates the thesis, not where wicks might touch.",
+            "- Decisions must be based on CONFIRMED signals, not speculation.",
+            "- Risk management is paramount: SL and TP required for every trade.",
+            "- Confidence must match signal strength: >70 required for trades (strong setups only).",
+            "- MAXIMIZE PROFIT: Learn from past trades, avoid repeated mistakes, improve win rate.",
+            "",
+            "## Technical Terminology (CRITICAL)",
+            "- **Golden Cross**: ONLY when 50 SMA crosses ABOVE 200 SMA (major bullish event, rare)",
+            "- **Death Cross**: ONLY when 50 SMA crosses BELOW 200 SMA (major bearish event, rare)",
+            "- **50>200 / 50<200**: Current SMA relationship shown in prompt (NOT a crossover event)",
+            "- **20 SMA crossing 50 SMA**: Short-term signal only, NOT a Golden/Death Cross",
+            "- Do NOT conflate short-term (20/50) crossovers with long-term (50/200) Golden/Death Crosses",
+            "",
+        ])
+
+        # Add performance context if available
+        if performance_context:
+            strategy_lines = [
+                "",
+                performance_context.strip(),
+                "",
+                "",
+                "## Profit Maximization Strategy",
+                "- LEARN from closed trades: Why did stops get hit? Were entries premature? Was trend strength misjudged?",
+                "- IMPROVE win rate: Only trade when multiple factors align strongly (see confluence rules in Response Format)",
+                "- AVOID repeated mistakes: If recent trades failed due to weak setups, demand stronger confirmation",
+                "- HOLD discipline: Better to miss a trade than force a weak setup",
+            ]
+            if has_open_position:
+                strategy_lines.extend([
+                    "- UPDATE positions actively: Move SL to breakeven after 1:1 or 1.5:1 gain, trail stops on strong trends, adjust TP if momentum extends",
+                    "- CLOSE proactively: If your analysis at candle close shows the thesis is invalidated, signal CLOSE — don't wait for SL to be hit",
+                ])
+            strategy_lines.append(
+                "- ADAPT to performance: If win rate is low, increase entry standards and risk/reward requirements",
+            )
+            header_lines.extend(strategy_lines)
+
+        if brain_context:
+            header_lines.extend([
+                "",
+                brain_context.strip(),
+            ])
+
+        # Add previous response context if available (strip JSON to save tokens)
+        if previous_response:
+            # Extract only text reasoning, exclude JSON block
+            text_reasoning = re.split(r'```json', previous_response, flags=re.IGNORECASE)[0].strip()
+            if text_reasoning:
+                # Calculate window duration safely using injected validator
+                window_minutes = 120 # Default fallback
+                if self.timeframe_validator:
+                    try:
+                        window_minutes = self.timeframe_validator.to_minutes(timeframe) * 2
+                    except Exception as e:  # pylint: disable=broad-exception-caught
+                        if self.logger:
+                            self.logger.warning("Failed to calculate relevance window for %s: %s", timeframe, e)
+
+                header_lines.extend([
+                    "",
+                    "## PREVIOUS ANALYSIS CONTEXT",
+                ])
+                if indicator_delta_alert:
+                    header_lines.append(indicator_delta_alert)
+                header_lines.extend([
+                    "Your last analysis reasoning (for continuity):",
+                    text_reasoning,
+                    "",
+                    "### DETERMINISTIC TIME CHECK",
+                    f"- **Current Time**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC",
+                    "- **Relevance**: PREVIOUS reasoning MUST be verified against CURRENT data. If previous claims (e.g., 'approaching' events) contradict the current clock or were based on now-outdated milestones, you MUST ignore or correct them.",
+                    f"- **Relevance Window**: Only consider an event 'imminent' if it occurs within the next 2 full candles (Window: {window_minutes} minutes).",
+                    "",
+                    "Use this context to maintain consistency in your analysis approach while prioritizing ground truth temporal data.",
+                ])
+
+        return "\n".join(header_lines)
+
+    def build_response_template(self, _has_chart_analysis: bool = False,
+                                dynamic_thresholds: Optional[Dict[str, Any]] = None,
+                                has_open_position: bool = True) -> str:
+        """Build the response template for trading decision output.
+
+        Args:
+            has_chart_analysis: Whether chart image analysis is available
+            dynamic_thresholds: Brain-learned thresholds for dynamic values
+            has_open_position: Whether a position is currently open. When False,
+                UPDATE and CLOSE are stripped from the allowed signal set.
+
+        Returns:
+            str: Formatted response template
+        """
+        thresholds = dynamic_thresholds or {}
+        # Core thresholds — tuned for active trading on short timeframes
+        adx_strong = thresholds.get("adx_strong_threshold", 20)
+        avg_sl = thresholds.get("avg_sl_pct", 2.5)
+        min_rr = thresholds.get("min_rr_recommended", 1.5)
+        conf_threshold = thresholds.get("confidence_threshold", 50)
+        # Extended thresholds
+        adx_weak = thresholds.get("adx_weak_threshold", 15)
+        conf_weak = thresholds.get("min_confluences_weak", 3)
+        conf_std = thresholds.get("min_confluences_standard", 2)
+        pos_reduce_mixed = thresholds.get("position_reduce_mixed", 0.15)
+        pos_reduce_div = thresholds.get("position_reduce_divergent", 0.25)
+        min_pos_size = thresholds.get("min_position_size", 0.15)
+        rr_borderline = thresholds.get("rr_borderline_min", 1.0)
+        rr_strong = thresholds.get("rr_strong_setup", 2.0)
+        # Threshold origin metadata
+        trade_count = thresholds.get("trade_count", 0)
+        learned_keys = set(thresholds.get("learned_keys", []))
+        # Safe MAE line
+        safe_mae_pct = thresholds.get("safe_mae_pct", 0)
+        safe_mae_line = ""
+        if safe_mae_pct > 0:
+            safe_mae_line = (
+                f"\n- **Safe Drawdown**: Historical winning trades survived up to {safe_mae_pct*100:.2f}% "
+                "drawdown (brain-learned). Ensure stop isn't too tight."
+            )
+        elif trade_count > 0:
+            safe_mae_line = (
+                "\n- **Safe Drawdown**: Insufficient trade data for MAE baseline — rely on ATR-based stops only."
+            )
+
+        # Signal enum restricted when no position is open
+        signal_enum = "BUY|SELL|HOLD|CLOSE|UPDATE" if has_open_position else "BUY|SELL|HOLD"
+        no_position_header = "" if has_open_position else (
+            "### ⚠️ NO OPEN POSITION — UPDATE & CLOSE ARE FORBIDDEN\n"
+            "You currently hold NO position. Valid signals this cycle: **BUY, SELL, HOLD** only.\n"
+            "If you would otherwise adjust or close, emit **HOLD** instead.\n\n"
+        )
+
+        response_template = f'''## Response Format
+{no_position_header}
+
+Structure your analysis before JSON:
+1. **MARKET STRUCTURE**: Current phase and trend state. Include **Multi-Timeframe Summary**: list each available timeframe (4h/12h/24h/3d/7d/Weekly/365D) with directional bias → state ALIGNED/MIXED/DIVERGENT and identify dominant timeframe.
+2. **INDICATOR ASSESSMENT**: Key technical signals and confluence
+2.5. **QUANTITATIVE & VISUAL VALIDATION** (required when data is present):
+    - **Statistical Signals**: Z-Score (mean-reversion risk if |Z|>1.5), Hurst exponent (trending >0.5 vs reverting <0.5), Kurtosis (tail risk if >3), Entropy, Skewness interpretation
+    - **Chart Validation** (only when chart image was provided): Summarize key observations from each panel — P1-PRICE (SMA alignment, key price levels), P2-RSI (zone + divergences), P3-VOLUME (trend + spikes), P4-CMF/OBV (flow direction). Flag any discrepancies between visual and numerical data.
+3. **CONTEXT & CATALYST**: Macro alignment, news, microstructure (if relevant)
+3.5. **SCENARIO ANALYSIS (Bull vs Bear)**:
+    - **Bull Case Argument**: Strongest arguments for LONG (even if weak)
+    - **Bear Case Argument**: Strongest arguments for SHORT (even if weak)
+    - **Verdict**: Why one side outweighs the other (weight historical data/anti-patterns)
+4. **RISK/REWARD**: Invalidation point, targets, R/R ratio
+5. **DECISION**: Signal with confidence justification
+
+Then output JSON:
+
+```json
+{{
+    "analysis": {{
+        "signal": "{signal_enum}",
+        "confidence": 0-100,
+        "rating": "BUY|OVERWEIGHT|HOLD|UNDERWEIGHT|SELL",
+        "confluence_factors": {{
+            "trend_alignment": 0-100,
+            "momentum_strength": 0-100,
+            "volume_support": 0-100,
+            "pattern_quality": 0-100,
+            "support_resistance_strength": 0-100
+        }},
+        "entry_price": number,
+        "stop_loss": number,
+        "take_profit": number,
+        "position_size": 0.0-1.0,
+        "reasoning": "1-2 sentence summary",
+        "key_levels": {{"support": [level1, level2], "resistance": [level1, level2]}},
+        "trend": {{"direction": "BULLISH|BEARISH|NEUTRAL", "strength_4h": 0-100, "strength_daily": 0-100, "timeframe_alignment": "ALIGNED|MIXED|DIVERGENT"}},
+        "risk_reward_ratio": number  // CALCULATE: reward / risk. For UPDATE: use Current Price as reference. For BUY/SELL: use entry_price.
+    }}
+}}
+```
+
+CONFLUENCE SCORING:
+Before finalizing your signal, rate each factor (0-100) based on how strongly it SUPPORTS your chosen signal:
+- 0 = Factor opposes the signal or is irrelevant
+- 50 = Neutral / Mixed signals
+- 100 = Factor strongly confirms the signal
+
+For BUY/SELL signals — score how strongly each factor supports the TRADE DIRECTION:
+1. **trend_alignment**: Multi-timeframe trend confluence (short/medium/long align with signal direction)
+2. **momentum_strength**: RSI, MACD, momentum oscillators supporting the signal
+3. **volume_support**: Volume profile confirms the move (buying volume for BUY, selling for SELL)
+4. **pattern_quality**: Score = (Number of patterns supporting the signal / Total patterns detected) * 100. Example: 1 bullish / 4 total = 25. DO NOT INFLATE THIS SCORE.
+5. **support_resistance_strength**: Proximity and strength of S/R levels supporting the trade setup
+
+For HOLD (no position) — score how strongly each factor JUSTIFIES STAYING OUT:
+1. **trend_alignment**: No clear trend / conflicting timeframes = 60-80 (HOLD justified). Strong directional alignment = 10-30 (potential trade missed).
+2. **momentum_strength**: Conflicting momentum signals = 60-80. Strong uniform momentum = 10-30.
+3. **volume_support**: Low/declining volume = 60-80 (confirms indecision). High volume with direction = 10-30.
+4. **pattern_quality**: Mixed/conflicting patterns = 60-80 (HOLD justified). Clear directional pattern = 10-30. DO NOT INFLATE THIS SCORE.
+5. **support_resistance_strength**: Price in no-man's land between S/R = 60-80. Price at clear actionable level = 20-40.
+
+CRITICAL: Provide EXACTLY ONE signal. Never say "CLOSE then HOLD" or "BUY followed by SELL". Make only the immediate action decision.
+
+=== 5-Tier Rating Scale ===
+Include a "rating" field in your JSON using this institutional scale:
+- **BUY**: Strong conviction, multiple confluences align, high confidence (>80)
+- **OVERWEIGHT**: Favorable outlook, gradually increase exposure (confidence 60-80)
+- **HOLD**: No clear edge, maintain current state, wait for confirmation
+- **UNDERWEIGHT**: Reduce exposure, take partial profits, adverse conditions (confidence 60-80 against)
+- **SELL**: Strong conviction to exit or short, multiple confluences against, high confidence (>80)
+
+Rating should be consistent with your signal and confidence level.
+
+=== Trend Strength Rules (Advisory) ===
+ADX + CHOPPINESS ASSESSMENT:
+- ADX < {adx_weak} AND Choppiness > 50: ⚠️ Weak trend + choppy. Needs {conf_weak}+ confluences.
+- ADX < {adx_weak} but Choppiness < 50: Potential trend emerging. Trade with strong confirmation.
+- ADX {adx_weak}-{adx_strong}: Developing trend. Standard {conf_std}+ confluences.
+- ADX >= {adx_strong}: Strong trend environment.
+
+CHOPPINESS INDEX CONTEXT:
+- > 61.8: Ranging | < 38.2: Trending | 38-62: Transitional
+
+NOTE: You may OVERRIDE these guidelines if you have exceptional conviction ( catalyst, {conf_weak + 1}+ confluences). State reasoning.
+
+POSITION SIZING FORMULA (calculate before finalizing - SHOW YOUR WORK in RISK/REWARD section):
+- Base size = confidence / 100 (e.g., 75 confidence = 0.75 base)
+        - If timeframe_alignment = "MIXED": reduce by {pos_reduce_mixed:.2f} (e.g., 0.75 - {pos_reduce_mixed:.2f} = {0.75 - pos_reduce_mixed:.2f})
+        - If timeframe_alignment = "DIVERGENT": reduce by {pos_reduce_div:.2f} (e.g., 0.75 - {pos_reduce_div:.2f} = {0.75 - pos_reduce_div:.2f})
+- In weak trend environments (ADX < {adx_weak}): consider smaller sizes
+- Final position_size = max({min_pos_size:.2f}, calculated_value)
+- FORMAT: "Position: base [X] - alignment [Y] = [Z]"
+
+MACRO TIMEFRAME CONFLICT (CRITICAL):
+If the 365D macro trend is BEARISH and you are going LONG (or vice versa):
+- Explicitly state: "⚠️ 365D MACRO CONFLICT: [direction]" in your analysis
+- Require 4+ strong confluences (standard is 3) or a clear REVERSAL structure (e.g. divergence, pattern break)
+- Differentiate between "Structural Bearishness" (don't buy) and "Overextended Bullishness" (valid short opportunity)
+If both 365D and Weekly macro conflict with your trade: Exercise EXTREME CAUTION. Only proceed if you identify a clear "Cycle Top/Bottom" or "Major Reversal" setup with 5+ confluences. Otherwise, HOLD is preferred.
+
+SHORT TRADE OPPORTUNITIES:
+These are GUIDELINES, not hard rules. Use your judgment based on overall confluence, just as with LONG trades.
+When Weekly Macro is BULLISH but short-term conditions suggest exhaustion, SHORT may be valid if you observe:
+- Statistical overextension (elevated Z-score, overbought oscillators at extremes)
+- Momentum divergence (price making new highs, but indicators failing to confirm)
+- Volume climax with rejection (exceptionally high volume at resistance with reversal candle pattern)
+- One-sided order book pressure (heavy sell-side absorption visible in microstructure data)
+🧠 THINK STEP BY STEP: Before dismissing SHORT, ask: "What would a professional mean-reversion trader see here?"
+SHORT trades require stricter confluence than LONG in a bull macro - but they are NOT forbidden. If your analysis shows a clear exhaustion setup, state your reasoning and proceed with appropriate position sizing.
+
+⚡ TRADING STYLE — ACTIVE & REACTIVE:
+You are an ACTIVE intraday/swing trader, NOT a passive observer. Your job is to FIND trades, not avoid them.
+- **Bias toward action**: When indicators show a directional lean (even moderate), TAKE THE TRADE with appropriate sizing. Do NOT default to HOLD out of caution.
+- **Momentum is king**: On short timeframes (≤1h), price momentum and order flow matter more than perfect confluence. A strong move with 2 confluences beats waiting for 4.
+- **Imperfect setups are tradeable**: A 55-confidence trade with tight SL is better than waiting 3 hours for a 75-confidence trade that never comes.
+- **HOLD is a last resort**: Only use HOLD when indicators are genuinely flat/contradictory with NO directional bias. If you see ANY edge, trade it.
+- **React to news fast**: Geopolitical events (Hormuz, Iran, OPEC) = immediate directional bias. Don't wait for "confirmation" — the move IS the confirmation.
+- **Scale position to conviction**: Low confidence (50-60) → smaller size (0.15-0.30). High confidence (80+) → full size. But ALWAYS trade when there's an edge.
+
+TRADING SIGNALS & CONFIDENCE:
+- BUY ({conf_threshold}-100 confidence): Directional bias supported by momentum + any 2 confluences + clear SL/TP + {min_rr:.1f}:1 R/R minimum
+- SELL ({conf_threshold}-100 confidence): Directional bias supported by momentum + any 2 confluences + clear SL/TP + {min_rr:.1f}:1 R/R minimum
+- HOLD (ONLY when confidence <{conf_threshold}): Genuinely flat market, zero directional bias, all indicators contradictory. JUSTIFY why no edge exists.
+- CLOSE: Exit position when SL/TP hit, or thesis invalidated with NO reverse setup. Use CLOSE ONLY when staying flat is correct.
+- UPDATE: Adjust existing position SL/TP when market structure improves
+
+⚡ REVERSAL RULE (CRITICAL — prevents missed entries):
+If you want to close an existing LONG and immediately re-enter SHORT (or vice versa), DO NOT emit "CLOSE" + describe "PREPARE SHORT" in the reasoning. The bot executes ONE signal per cycle and will NOT auto-queue your reverse intent.
+- Emit **SELL** directly when you want to flip LONG→SHORT (the bot closes the long and opens the short in the same cycle).
+- Emit **BUY** directly when you want to flip SHORT→LONG.
+- Only emit CLOSE when you want to stay flat (no re-entry this cycle).
+- Provide entry_price / stop_loss / take_profit for the NEW direction, not the closed one.
+
+HOLD SIGNAL JSON FIELDS (no open position):
+- `entry_price`: Your conditional trigger price — the level where conditions would justify entry
+- `stop_loss` / `take_profit`: Levels relative to that conditional entry
+- `position_size`: 0.0 (no position opened)
+- `risk_reward_ratio`: Calculated from the conditional entry (shows the setup you are waiting for)
+
+RISK/REWARD GUIDELINES:
+- R/R < {rr_borderline:.1f}: Unfavorable — reduce size or skip unless strong catalyst
+- R/R {rr_borderline:.1f}-{min_rr:.1f}: Acceptable with 2+ confluences
+- R/R >= {min_rr:.1f}: Good quality — trade with normal sizing
+- R/R >= {rr_strong:.1f}: Strong setup — increase size, preferred for counter-trend
+
+R/R CALCULATION (MANDATORY - show your work):
+- For BUY/SELL signals: risk = |entry_price - stop_loss|, reward = |take_profit - entry_price|
+- For UPDATE signals: risk = |Current Price - stop_loss|, reward = |take_profit - Current Price|
+  (UPDATE adjusts an EXISTING position — R/R must reflect distance from where price IS, not original entry)
+- For HOLD (no position): Use your conditional `entry_price` (NOT current market price). risk = |entry_price - stop_loss|, reward = |take_profit - entry_price|. This shows the quality of the setup you are waiting for.
+- risk_reward_ratio = reward / risk
+
+RISK MANAGEMENT (Stop Loss & Take Profit):{safe_mae_line}
+LONG trades:
+- SL: Below swing low + 1x ATR buffer (max {avg_sl:.1f}% from entry) | Example: Entry $100, Swing Low $97, ATR $1 → SL $96
+- TP: Key resistance levels, Fibonacci (0.618/0.786/1.0), previous highs | Multiple targets: TP1=1.5R, TP2=2.5R, TP3=3.5R
+
+SHORT trades:
+- SL: Above swing high + 1x ATR buffer (max {avg_sl:.1f}% from entry) | Example: Entry $100, Swing High $103, ATR $1 → SL $104
+- TP: Key support levels, Fibonacci (0.382/0.236/0.0), previous lows | Multiple targets: TP1=1.5R, TP2=2.5R, TP3=3.5R
+
+
+Mandatory: All trades require stops based on technical levels (not arbitrary %), accounting for ATR volatility, positioned to invalidate thesis if hit.'''
+
+        # Add threshold origin annotations if brain data is available
+        if trade_count > 0:
+            if learned_keys:
+                origin_parts = [f"min_rr={min_rr}" if "min_rr_recommended" in learned_keys else None,
+                                f"adx_strong={adx_strong}" if "adx_strong_threshold" in learned_keys else None,
+                                f"confidence={conf_threshold}" if "confidence_threshold" in learned_keys else None,
+                                f"avg_sl={avg_sl:.1f}%" if "avg_sl_pct" in learned_keys else None]
+                learned = [p for p in origin_parts if p]
+                if learned:
+                    response_template += (
+                        f"\n\nTHRESHOLD ORIGIN: {', '.join(learned)} are brain-learned from {trade_count} closed trades. "
+                        "Other thresholds use industry-standard defaults."
+                    )
+                else:
+                    response_template += (
+                        f"\n\nTHRESHOLD ORIGIN: All thresholds use industry-standard defaults "
+                        f"({trade_count} trades insufficient to learn custom values)."
+                    )
+            else:
+                response_template += (
+                    f"\n\nTHRESHOLD ORIGIN: All thresholds use industry-standard defaults "
+                    f"({trade_count} trades insufficient to learn custom values)."
+                )
+        else:
+            response_template += (
+                "\n\nTHRESHOLD ORIGIN: All thresholds use industry-standard defaults (no trade history)."
+            )
+
+        return response_template
+
+    def build_analysis_steps(self, symbol: str, has_advanced_support_resistance: bool = False, has_chart_analysis: bool = False, available_periods: dict = None) -> str:
+        """Build analysis steps instructions for the AI model.
+
+        Args:
+            symbol: Trading symbol being analyzed
+            has_advanced_support_resistance: Whether advanced S/R indicators are detected
+            has_chart_analysis: Whether chart image analysis is available (Google AI only)
+            available_periods: Dict of period names to candle counts (e.g., {"12h": 2, "24h": 4, "3d": 12, "7d": 28})
+
+        Returns:
+            str: Formatted analysis steps
+        """
+        # Get the base asset for market comparisons
+        analyzed_base = symbol.split('/')[0] if '/' in symbol else symbol
+
+        # Build dynamic timeframe description based on available periods
+        if available_periods:
+            period_names = list(available_periods.keys())
+            timeframe_desc = f"Analyze the provided Multi-Timeframe Price Summary periods: {', '.join(period_names)}"
+        else:
+            timeframe_desc = (
+                "Analyze the provided Multi-Timeframe Price Summary periods "
+                "(dynamically calculated based on your analysis timeframe)"
+            )
+
+        analysis_steps = f"""
+## Analysis Steps (use findings to determine trading signal):
+
+**Step-to-Output Mapping:**
+Steps 1-4 → Section 1 (MARKET STRUCTURE) + Section 2 (INDICATOR ASSESSMENT)
+Step 5 → Section 3 (CONTEXT & CATALYST)
+Step 5.5 → Section 3.5 (SCENARIO ANALYSIS)
+Step 6 → Sections 3 + 5 (NEWS & historical evidence in CONTEXT and DECISION)
+Step 7 → Section 2.5 (QUANTITATIVE & VISUAL VALIDATION)
+Step 8 (if chart) → Section 2.5 (chart sub-section)
+Synthesis → Sections 4 + 5 (RISK/REWARD + DECISION)
+
+1. MULTI-TIMEFRAME ASSESSMENT:
+   {timeframe_desc} | Compare short vs multi-day vs long-term (30d+, 365d) | Weekly macro (200-week SMA)
+   🧠 Are timeframes aligned or divergent? Which dominates?
+
+2. TECHNICAL INDICATORS:
+   Analyze all provided Momentum, Trend, Volatility, and Volume indicators (RSI, MACD, ADX, ATR, ROC, MFI, etc.)
+   🧠 Do indicators confirm each other or show divergence?
+
+3. PATTERN RECOGNITION (Conservative Approach):
+   **Swing Structure:** HH/HL = uptrend, LH/LL = downtrend | **Classic:** H&S, double tops/bottoms, wedges, flags | **Candlesticks:** doji, hammer, engulfing at key S/R | **Divergences:** Price vs RSI/MACD/OBV | **IMPORTANT:** If unclear, state "No clear pattern" - do NOT force conclusions
+   🧠 Is pattern complete or forming? Could this be a fakeout?
+
+4. SUPPORT/RESISTANCE:
+   Key levels across timeframes | Historical reaction zones (3+ touches) | Confluences (S/R + Fib + SMA) | Volume nodes | Risk/reward for SL/TP
+   🧠 How did price react last time at this level?
+
+5. MARKET CONTEXT:
+   Market Overview (global cap, dominance)"""
+
+        if "BTC" not in analyzed_base:
+            analysis_steps += "\n   - Compare performance relative to BTC (correlation/divergence)"
+
+        if "ETH" not in analyzed_base:
+            analysis_steps += "\n   - Compare performance relative to ETH if relevant"
+
+        analysis_steps += """
+ | Fear & Greed Index (extremes) | Asset alignment with market | Relevant events
+
+5.5. BULL vs BEAR CASE (Forced Dialectical Analysis):
+   🐂 BULL CASE: What confluence supports LONG? What would need to happen for price to rise?
+   🐻 BEAR CASE: What confluence supports SHORT? What would need to happen for price to fall?
+   🧠 WHICH PERSPECTIVE WINS? Justify with data. If brain has relevant semantic rules for either direction, weight those appropriately.
+
+6. NEWS & SENTIMENT:
+   Asset news | Market events | Sentiment | Institutional activity | Regulatory impacts | News that could override technicals
+
+7. STATISTICAL ANALYSIS:
+   Z-Score (extremes revert) | Kurtosis (tail risk) | Hurst (>0.5 trending, <0.5 reverting) | Volatility cycles"""
+
+        # Add chart analysis steps only if chart images are available
+        step_number = 8
+        if has_chart_analysis:
+            cfg_limit = int(self.config.AI_CHART_CANDLE_LIMIT)
+
+            analysis_steps += f"""
+
+{step_number}. CHART IMAGE ANALYSIS (~{cfg_limit} candles, 4 panels):
+   **P1-PRICE:** SMA50 (orange), SMA200 (purple) - Golden/Death Cross? | Read MIN/MAX labels | Apply patterns from Step 3 to visual data
+   **P2-RSI:** Read value from annotation | Zone (>70 overbought, <30 oversold) | Check divergence vs price
+   **P3-VOLUME:** Trend direction | Spikes align with price moves? | Green/red bar ratio
+   **P4-CMF/OBV:** CMF (cyan, left axis): >0 buying, <0 selling | OBV (magenta, right): rising=accumulation
+   **VALIDATE:** Cross-check visuals with numerical indicators - flag discrepancies"""
+            step_number += 1
+
+        analysis_steps += f"""
+
+{step_number}. SYNTHESIS:
+   Trend direction/strength | Indicator confluence | SL/TP levels | R/R ratio | Confidence | Invalidation triggers
+
+NOTE: Indicators calculated from CLOSED CANDLES ONLY. No pattern = state "No clear pattern detected"."""
+
+        if has_advanced_support_resistance:
+            analysis_steps += """
+ADVANCED S/R: Volume-weighted pivots with 3+ touches, above-average volume. Only strong levels provided."""
+
+        return analysis_steps
