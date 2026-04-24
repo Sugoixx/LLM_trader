@@ -15,8 +15,6 @@ class ConfigProtocol(Protocol):
     Implementations must provide all these members to satisfy the Protocol.
     """
 
-
-
     @property
     def BOT_TOKEN_DISCORD(self) -> str | None: ...
 
@@ -46,8 +44,6 @@ class ConfigProtocol(Protocol):
 
     @property
     def ADMIN_USER_IDS(self) -> list[int]: ...
-
-
 
     @property
     def PROVIDER(self) -> str: ...
@@ -79,8 +75,6 @@ class ConfigProtocol(Protocol):
     @property
     def BLOCKRUN_MODEL(self) -> str: ...
 
-
-
     @property
     def LOGGER_DEBUG(self) -> bool: ...
 
@@ -108,15 +102,11 @@ class ConfigProtocol(Protocol):
     @property
     def INCLUDE_COIN_DESCRIPTION(self) -> bool: ...
 
-
-
     @property
     def DEBUG_SAVE_CHARTS(self) -> bool: ...
 
     @property
     def DEBUG_CHART_SAVE_PATH(self) -> str: ...
-
-
 
     @property
     def LOG_DIR(self) -> str: ...
@@ -124,12 +114,8 @@ class ConfigProtocol(Protocol):
     @property
     def DATA_DIR(self) -> str: ...
 
-
-
     @property
     def FILE_MESSAGE_EXPIRY(self) -> int: ...
-
-
 
     @property
     def RAG_UPDATE_INTERVAL_HOURS(self) -> int: ...
@@ -194,11 +180,30 @@ class ConfigProtocol(Protocol):
     def DEBATE_USE_QUICK_MODEL(self) -> bool: ...
 
     @property
+    def DEBATE_COMBINED_ARGUMENTS(self) -> bool: ...
+
+    @property
     def DEBATE_SKIP_FOR_HOLD(self) -> bool: ...
 
     # Backtest Configuration
     @property
     def BACKTEST_INITIAL_CAPITAL(self) -> float: ...
+
+    # AI Safety Gates
+    @property
+    def AI_MIN_CONFIDENCE(self) -> str: ...
+
+    @property
+    def AI_BLOCKED_DEBATE_VERDICTS(self) -> List[str]: ...
+
+    @property
+    def AI_CONSECUTIVE_LOSS_THRESHOLD(self) -> int: ...
+
+    @property
+    def AI_CONSECUTIVE_LOSS_COOLDOWN_MINUTES(self) -> int: ...
+
+    @property
+    def AI_MIN_RR_AFTER_FEES(self) -> float: ...
 
     # Execution Engine (Layer 2) Configuration
     @property
@@ -272,14 +277,14 @@ class ConfigProtocol(Protocol):
     @property
     def ASSET_CLASS(self) -> str: ...
 
-
-
     def get_env(self, key: str, default: Any = None) -> Any: ...
 
     def get_config(self, section: str, key: str, default: Any = None) -> Any: ...
 
     def get_section(self, section: str) -> Dict[str, Any]: ...
 
-    def get_model_config(self, model_name: str, overrides: Dict[str, Any] | None = None) -> Dict[str, Any]: ...
+    def get_model_config(
+        self, model_name: str, overrides: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]: ...
 
     def reload(self) -> None: ...

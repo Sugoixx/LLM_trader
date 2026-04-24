@@ -221,10 +221,14 @@ class ModelManager(ModelManagerProtocol):
             )
         return await self._process_result(result)
 
-    def supports_image_analysis(self, provider_override: Optional[str] = None) -> bool:
-        """Check if the selected provider supports image analysis."""
+    def supports_image_analysis(
+        self,
+        provider_override: Optional[str] = None,
+        model_override: Optional[str] = None,
+    ) -> bool:
+        """Check if the selected provider and model support image analysis."""
         provider_name = (provider_override or self.provider or "").lower()
-        return self._orchestrator.supports_chart(provider_name)
+        return self._orchestrator.supports_chart(provider_name, model_override)
 
     async def send_quick_prompt(
         self,

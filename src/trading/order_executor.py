@@ -204,6 +204,10 @@ class LiveExecutor:
         self.config = config
         self.exchange = exchange
         self._order_lock = asyncio.Lock()
+        # Track last filled quantity per symbol so modify_position can size the OCO.
+        self._last_fill: Dict[str, float] = {}
+        # Track OCO list IDs so we can cancel them before a close order.
+        self._oco_list_ids: Dict[str, str] = {}
 
     # ---- Public API -------------------------------------------------------
 
@@ -216,7 +220,10 @@ class LiveExecutor:
         order_type: str = "limit",
         source: str = "ai",
     ) -> OrderResult:
-        return await self._place_order(symbol, side, quantity, price, order_type)
+        result = await self._place_order(symbol, side, quantity, price, order_type)
+        if result.success and result.filled > 0:
+            self._last_fill[symbol] = result.filled
+        return result
 
     async def close_order(
         self,
@@ -227,7 +234,13 @@ class LiveExecutor:
         order_type: str = "limit",
         source: str = "ai",
     ) -> OrderResult:
-        return await self._place_order(symbol, side, quantity, price, order_type)
+        # Cancel any protection orders (OCO) before placing the close order.
+        # If the OCO is not cancelled first, the two SELL orders would compete.
+        await self._cancel_protection_orders(symbol)
+        result = await self._place_order(symbol, side, quantity, price, order_type)
+        if result.success or getattr(result, "already_closed", False):
+            self._last_fill.pop(symbol, None)
+        return result
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         try:
@@ -240,12 +253,23 @@ class LiveExecutor:
 
     async def get_balance(self, currency: str = "USDC") -> float:
         try:
-            balance = await self.exchange.fetch_balance()
-            free = float(balance.get("free", {}).get(currency, 0))
-            return free
-        except Exception as e:
-            self.logger.error("[LIVE] Failed to fetch balance: %s", e)
+            # Use private_get_account (GET /api/v3/account) directly — avoids ccxt
+            # calling sapi endpoints which don't exist on Binance demo-api.
+            response = await self.exchange.private_get_account()
+            balances = response.get("balances", [])
+            for b in balances:
+                if b.get("asset") == currency:
+                    return float(b.get("free", 0))
             return 0.0
+        except Exception:
+            # Fallback to standard fetch_balance
+            try:
+                balance = await self.exchange.fetch_balance()
+                free = float(balance.get("free", {}).get(currency, 0))
+                return free
+            except Exception as e:
+                self.logger.error("[LIVE] Failed to fetch balance: %s", e)
+                return 0.0
 
     async def get_open_orders(self, symbol: str) -> list:
         try:
@@ -308,24 +332,110 @@ class LiveExecutor:
         return constraints
 
     async def modify_position(self, symbol: str, sl: float, tp: float, source: str = "ai") -> bool:
-        """CCXT spot does not support position SL/TP modification natively.
+        """Place an OCO order (SL + TP) to protect the open LONG position on Binance spot.
 
-        For futures/margin accounts that support it via CCXT, override this.
-        Logs a warning so the gap is visible in the journal.
+        On Binance spot demo/mainnet, places a SELL OCO:
+          - Limit leg  → take-profit (executes when price reaches TP)
+          - Stop-limit leg → stop-loss (triggers + executes when price drops to SL)
+
+        Any previous protection orders for the symbol are cancelled first.
+        Returns True on success, False if OCO is unsupported or an error occurs.
         """
-        self.logger.warning(
-            "[LIVE] modify_position called for %s SL=%.5f TP=%.5f — "
-            "CCXT spot does not support SL/TP modification. "
-            "Use MT5OrderExecutor for broker-side SL/TP updates.",
-            symbol, sl, tp,
-        )
-        return False
+        exchange_id = getattr(self.exchange, "id", "")
+        if exchange_id != "binance":
+            self.logger.warning(
+                "[LIVE] modify_position: OCO not implemented for exchange '%s' — "
+                "SL/TP will be managed by the bot internally.",
+                exchange_id,
+            )
+            return False
+
+        quantity = self._last_fill.get(symbol, 0.0)
+        if quantity <= 0:
+            self.logger.warning(
+                "[LIVE] modify_position: no tracked fill for %s — cannot size OCO",
+                symbol,
+            )
+            return False
+
+        # Cancel existing protection orders before placing new ones
+        await self._cancel_protection_orders(symbol)
+
+        try:
+            # Price precision for the symbol (use exchange helper when available)
+            def _fmt(p: float) -> float:
+                try:
+                    return float(self.exchange.price_to_precision(symbol, p))
+                except Exception:
+                    return round(p, 2)
+
+            tp_price = _fmt(tp)
+            sl_trigger = _fmt(sl)
+            # Stop-limit execution price: 0.2% below trigger to absorb slippage
+            sl_limit = _fmt(sl * 0.998)
+
+            oco = await self.exchange.create_order(
+                symbol,
+                "oco",
+                "sell",
+                quantity,
+                tp_price,
+                params={
+                    "stopPrice": sl_trigger,
+                    "stopLimitPrice": sl_limit,
+                    "stopLimitTimeInForce": "GTC",
+                },
+            )
+
+            list_id = str((oco.get("info") or {}).get("orderListId", ""))
+            if list_id:
+                self._oco_list_ids[symbol] = list_id
+
+            self.logger.info(
+                "[LIVE] [%s] OCO protection placed — SL=%.2f TP=%.2f qty=%.6f%s",
+                source.upper(), sl, tp, quantity,
+                f" listId={list_id}" if list_id else "",
+            )
+            return True
+
+        except (ccxt.NotSupported, ccxt.InvalidOrder, ccxt.ExchangeError) as e:
+            self.logger.warning(
+                "[LIVE] OCO placement failed — position has no broker-side SL/TP: %s", e
+            )
+            return False
+        except Exception as e:
+            self.logger.error("[LIVE] Unexpected error placing OCO: %s", e)
+            return False
 
     @property
     def is_live(self) -> bool:
         return True
 
     # ---- Internal ---------------------------------------------------------
+
+    async def _cancel_protection_orders(self, symbol: str) -> None:
+        """Cancel all open orders for `symbol` (clears OCO protection before a close)."""
+        try:
+            open_orders = await self.exchange.fetch_open_orders(symbol)
+        except Exception as e:
+            self.logger.warning("[LIVE] fetch_open_orders(%s) failed: %s", symbol, e)
+            self._oco_list_ids.pop(symbol, None)
+            return
+        if not open_orders:
+            self._oco_list_ids.pop(symbol, None)
+            return
+        for order in open_orders:
+            try:
+                await self.exchange.cancel_order(order["id"], symbol)
+                self.logger.info(
+                    "[LIVE] Cancelled open order %s (%s) for %s",
+                    order["id"], order.get("type", "?"), symbol,
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "[LIVE] Failed to cancel order %s: %s", order["id"], e
+                )
+        self._oco_list_ids.pop(symbol, None)
 
     @retry_async(max_retries=2, initial_delay=1.0)
     async def _place_order(
@@ -380,7 +490,20 @@ class LiveExecutor:
             except ccxt.InsufficientFunds as e:
                 msg = f"Insufficient funds: {e}"
                 self.logger.error("[LIVE] %s", msg)
-                return OrderResult(success=False, error=msg, symbol=symbol, side=side)
+                # For SELL (close long) / BUY (close short): InsufficientFunds means
+                # we don't hold the base asset — the position was never opened on this
+                # account (e.g. opened in demo mode before live was configured).
+                # Mark as already_closed so the strategy cleans up locally.
+                already_closed = side.lower() == "sell" or (
+                    side.lower() == "buy" and order_type not in ("open", "limit")
+                )
+                return OrderResult(
+                    success=False,
+                    error=msg,
+                    symbol=symbol,
+                    side=side,
+                    already_closed=already_closed,
+                )
             except ccxt.InvalidOrder as e:
                 msg = f"Invalid order: {e}"
                 self.logger.error("[LIVE] %s", msg)
@@ -413,6 +536,46 @@ class LiveExecutor:
                 fee=fee_cost,
                 fee_currency=fee_curr,
                 raw=raw_order,
+            )
+
+    async def startup(self) -> None:
+        """Pre-load market data then switch to demo-api.binance.com.
+
+        ccxt sends X-MBX-APIKEY even on public endpoints. Mainnet Binance
+        rejects demo keys on any request. Fix: temporarily clear credentials,
+        load markets (public call), then restore credentials and switch URLs
+        to demo-api.binance.com.
+        """
+        exchange_id = getattr(self.exchange, "id", "")
+        if exchange_id != "binance":
+            return
+
+        saved_key = self.exchange.apiKey
+        saved_secret = self.exchange.secret
+        try:
+            # Step 1: clear credentials so mainnet public call succeeds
+            self.exchange.apiKey = ""
+            self.exchange.secret = ""
+            self.exchange.options["fetchCurrencies"] = False
+            self.exchange.options.setdefault("fetchMarkets", ["spot"])
+            await self.exchange.load_markets()
+            self.logger.info(
+                "[LIVE] Markets pre-loaded (%d symbols)", len(self.exchange.markets)
+            )
+        except Exception as e:
+            self.logger.warning("[LIVE] startup market pre-load failed: %s", e)
+        finally:
+            # Step 2: restore credentials
+            self.exchange.apiKey = saved_key
+            self.exchange.secret = saved_secret
+            # Step 3: switch private URLs to demo-api.binance.com
+            demo_urls = self.exchange.urls.get("demo", {})
+            if demo_urls and isinstance(self.exchange.urls.get("api"), dict):
+                self.exchange.urls["api"].update(demo_urls)
+            for sapi_key in ("sapi", "sapiV2", "sapiV3", "sapiV4"):
+                self.exchange.urls["api"].pop(sapi_key, None)
+            self.logger.info(
+                "[LIVE] Switched exchange URLs to demo-api.binance.com"
             )
 
     async def close(self) -> None:

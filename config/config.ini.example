@@ -1,205 +1,205 @@
+# =============================================================================
+#  LLM_TRADER — Configuration (EXAMPLE / TEMPLATE)
+#  Copy to config.ini and adjust to your setup.
+#  Sections: ai_providers | symbol | trading | mt5 | crypto | execution_engine
+#            fast_trading | safety | rag | dashboard | debug
+# =============================================================================
+
+
+# =============================================================================
+# [ai_providers]  Provider selection + model parameters
+# =============================================================================
 [ai_providers]
-# Options: "local", "googleai", "openrouter", "blockrun", "all"
-# - "local": Use LM Studio only
-# - "googleai": Use Google AI Studio only
-# - "openrouter": Use OpenRouter only
-# - "blockrun": Use BlockRun.AI only
-# - "all": Use fallback system (tries primary providers first, then falls back)
+# Options: "local" | "googleai" | "openrouter" | "blockrun" | "all"
 provider = googleai
 
-# Base URL for local LM Studio instance (e.g., http://localhost:1234/v1)
+# Priority order when provider = "all": first provider to respond wins.
+# "local" costs nothing — put it first to avoid burning API credits.
+# Chart requests skip "local" automatically (no vision support).
+all_provider_order = local,googleai,openrouter,blockrun
+
+# ---------- LM Studio (local) ------------------------------------------------
 lm_studio_base_url = http://localhost:1234/v1
-# Model identifier to use with LM Studio, leave empty for auto select
 lm_studio_model =
-# Enable streaming for LM Studio (true/false)
 lm_studio_streaming = false
 
-# Base URL for OpenRouter API
+# ---------- OpenRouter -------------------------------------------------------
 openrouter_base_url = https://openrouter.ai/api/v1
-# Primary model to use with OpenRouter
 openrouter_base_model = google/gemini-3-flash-preview
-# Fallback model to use if the primary OpenRouter model fails
 openrouter_fallback_model = deepseek/deepseek-r1:free
 
-# Model identifier for Google AI Studio (e.g., gemini-flash-latest, gemini-2.5-flash)
+# ---------- Google AI Studio -------------------------------------------------
 google_studio_model = gemini-3-flash-preview
-# BlockRun.AI Configuration
-# Base URL for BlockRun API
 
+# ---------- BlockRun.AI ------------------------------------------------------
 blockrun_base_url = https://blockrun.ai/api
-# Model to use with BlockRun (format: provider/model)
-# Examples: openai/gpt-4o, anthropic/claude-sonnet-4, google/gemini-2.5-flash
 blockrun_model = deepseek/deepseek-reasoner
 
-[general]
-# Default cryptocurrency pair to analyze if none specified
-crypto_pair = BTC/USDC
-# Default timeframe for technical analysis (e.g., 1h, 4h, 1d)
-timeframe = 4h
-# Minimum minutes between LLM analysis calls (0 = every candle close)
-# For sub-hourly timeframes (1m-30m), set this to avoid spamming the LLM.
-# Recommended: 5 for 1m, 5 for 5m, 15 for 15m, 0 for 1h+
-analysis_cooldown_minutes = 0
-# In MT5 mode: skip LLM calls when market is closed (avoids useless API costs)
-skip_llm_when_market_closed = true
-# In MT5 mode: still run one analysis shortly before next market open (minutes)
-preopen_analysis_minutes = 20
-# Number of candles to fetch for internal technical analysis calculation
-candle_limit = 999
-# Number of candles to visualize in the chart images sent to the AI
-ai_chart_candle_limit = 125
-# Master switch to enable or disable the Discord bot integration
-discord_bot = true
-# Whether to include project description in coin details (useful for unknown tokens)
-include_coin_description = false
-
-[debug]
-# Save generated chart images to disk for debugging purposes
-save_chart_images = false
-# Directory path to save debug chart images
-chart_save_path = chart_images
-# Enable detailed logic (DEBUG level) logging
-logger_debug = true
-
-[directories]
-# Directory to store log files
-log_dir = logs
-# Directory to store persistent data
-data_dir = data
-
-[rag]
-# Cache validity duration (in hours).
-# - Automatic Analysis: ALWAYS fetches fresh news (ignores this).
-# - Manual Analysis ('a'): Uses cached news if younger than this interval. Set to 0 for always fresh.
-update_interval_hours = 4
-# Frequency (in hours) to update news categories
-categories_update_interval_hours = 168
-# Frequency (in hours) to refresh the CoinGecko coin list
-coingecko_update_interval_hours = 24
-# Frequency (in hours) to refresh DefiLlama fundamentals data (0.25 = 15 minutes)
-defillama_update_interval_hours = 0.25
-# API endpoint for CoinGecko global market data
-coingecko_global_api_url = https://api.coingecko.com/api/v3/global
-# Maximum number of news articles to include in the AI's context
-news_limit = 5
-# Maximum number of tokens per article chunk for processing
-article_max_tokens = 500
-# Filter news sources to reliable feeds only (prevents stale articles with current dates)
-news_filter_sources = true
-# Optional: Override default Tier 1 feeds (comma-separated: cointelegraph,coindesk,theblock,decrypt,bitcoinmagazine)
-news_allowed_feeds = seekingalpha,invezz,coinpaper,cryptopotato
-
-[exchanges]
-# List of exchanges to use for symbol lookup (in priority order)
-supported = binance,kucoin,gateio,mexc,hyperliquid
-# Frequency (in hours) to refresh exchange market data
-market_refresh_hours = 24
-
-[demo_trading]
-# Simulated capital in quote currency (e.g., USDC) for position size calculation
-demo_quote_capital = 10000
-# Transaction fee percentage for limit orders (0.00075 = 0.075%)
-transaction_fee_percent = 0.00075
-
-[mt5]
-# MetaTrader 5 mode — trade Forex, Oil, Indices, Commodities via MT5 broker
-# When enabled, replaces CCXT crypto exchanges with MT5 terminal connection
-# Requires: pip install MetaTrader5 (Windows only) + MT5 terminal running
-enabled = false
-# Quote freshness threshold (seconds). Older ticks are treated as closed market.
-market_stale_tick_seconds = 1800
-# Optional: full path to MT5 terminal.exe (auto-detected if omitted)
-# terminal_path = C:\Program Files\MetaTrader 5\terminal64.exe
-
-[cooldowns]
-# File message expiry is configured in hours; loader converts it to seconds at runtime.
-file_message_expiry = 168
-
-[model_config]
-# Default model configuration parameters
-# Controls randomness: 0.0 = deterministic, 1.0 = creative
+# ---------- Model parameters (default) --------------------------------------
 temperature = 0.7
-# Nucleus sampling: considering tokens with top_p probability mass
 top_p = 0.9
-# Top-k sampling: considering the top k most likely tokens
 top_k = 40
-# Frequency penalty to reduce repetition
-#freq_penalty = 0.1
-# Presence penalty to encourage new topics
-#pres_penalty = 0.1
-# Maximum number of tokens to generate in the response
 max_tokens = 32768
+#freq_penalty = 0.1
+#pres_penalty = 0.1
 
-# Google configuration overrides (Google models often require specific settings)
-# Gemini 3 Flash Preview Specifics:
-# - Temperature: MUST be 1.0 (Default). Do not lower; use "Thinking Levels" for reasoning control.
-# - TopK: Fixed at 64 by the model.
-# - Thinking Level: Controls reasoning depth (minimal, low, medium, high). Default: high.
-#   Ignored for models that don't support it (e.g., Gemini 2.5).
+# ---------- Google-specific overrides ----------------------------------------
 google_temperature = 1.0
 google_top_p = 0.95
 google_top_k = 64
 google_max_tokens = 32768
 google_thinking_level = high
-# Agentic Vision (Code Execution): Enables the model to generate and run Python code
-# to analyze images more precisely (e.g., zooming, counting, calculations).
-# Available for Gemini 3 Flash+ models via Google AI Studio API only (not OpenRouter).
-# May increase token usage slightly but improves accuracy for complex visual analysis.
 google_code_execution = false
 
-[dashboard]
-# Enable or disable the web dashboard entirely (true/false)
-# Can also be toggled at runtime via keyboard: 'd'
-enabled = true
-# Host to bind the dashboard server to
-# Use 127.0.0.1 for local access only (Recommended for security)
-# Use 0.0.0.0 to allow access from other devices on the network
-host = 0.0.0.0
-# Port to listen on
-port = 8000
-# Enable Cross-Origin Resource Sharing (CORS)
-# Set to true only if you need to access the API from a different domain/port (e.g. external tools)
-enable_cors = false
-# Comma-separated list of allowed origins (e.g. http://localhost:3000, http://example.com)
-# Use "*" to allow all origins (NOT recommended for production)
-cors_origins = *
 
-[live_trading]
-# Enable real order execution on the exchange (false = paper trading only)
-# ⚠️  WARNING: Setting this to true will place REAL orders with REAL money.
+# =============================================================================
+# [symbol]  Active trading instrument
+# =============================================================================
+[symbol]
+# Crypto  : BTC/USDT  BTC/USDC  ETH/USDT
+# Forex   : EURUSD  GBPUSD  USDJPY
+# Metals  : XAUUSD (Gold)  XAGUSD (Silver)
+# Oil     : XTIUSD (WTI)  XBRUSD (Brent)  XNGUSD (Natural Gas)
+crypto_pair = BTC/USDC
+# Valid: 1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 1w
+timeframe = 4h
+candle_limit = 999
+ai_chart_candle_limit = 125
+
+
+# =============================================================================
+# [trading]  General behaviour, live on/off, demo capital, backtest, debate
+# =============================================================================
+[trading]
+# 0 = call LLM every candle close. Guide: 1m→5 | 5m→5 | 15m→15 | 30m→0 | 1h+→0
+analysis_cooldown_minutes = 0
+discord_bot = true
+include_coin_description = false
+
+# ---- Live trading -----------------------------------------------------------
+# DANGER: true = real orders with real money
 enabled = false
-# Exchange to use for live trading (must match a ccxt exchange id, e.g. binance)
-exchange = binance
-# Order type: "limit" or "market"
 order_type = limit
-# Maximum USD value per single order (safety cap, legacy global)
+
+# ---- Demo / paper trading ---------------------------------------------------
+demo_quote_capital = 10000
+transaction_fee_percent = 0.00075
+
+# ---- Backtesting ------------------------------------------------------------
+initial_capital = 10000
+
+# ---- Bull/Bear debate -------------------------------------------------------
+debate_enabled = false
+debate_use_quick_model = true
+debate_skip_for_hold = true
+
+
+# =============================================================================
+# [mt5]  MetaTrader 5 — Forex / Commodities / Indices
+# =============================================================================
+[mt5]
+# true = use MT5 terminal instead of CCXT (Windows only)
+enabled = false
+# terminal_path = C:\Program Files\MetaTrader 5\terminal64.exe
+skip_llm_when_market_closed = true
+preopen_analysis_minutes = 20
+market_stale_tick_seconds = 1800
+
+
+# =============================================================================
+# [crypto]  CCXT crypto exchanges (used when mt5.enabled = false)
+# =============================================================================
+[crypto]
+exchange = binance
+# testnet = true for Binance Spot DEMO (demo-api.binance.com — separate keys)
+testnet = false
+supported = binance,kucoin,gateio,mexc,hyperliquid
+market_refresh_hours = 24
+
+
+# =============================================================================
+# [execution_engine]  Layer 2 — real-time SL/TP/trailing via WebSocket
+# =============================================================================
+[execution_engine]
+enabled = true
+trailing_enabled = true
+trailing_atr_multiplier = 2.0
+trailing_atr_multiplier_after_tp1 = 0.5
+trailing_breakeven_on_tp1 = true
+partial_enabled = false
+partial_targets = 0.5:0.5, 1.0:1.0
+
+
+# =============================================================================
+# [fast_trading]  Algo-only fast mode — LLM acts as correction layer only
+# =============================================================================
+[fast_trading]
+min_interval_seconds = 900
+daily_loss_pct_limit = -3.0
+consecutive_loss_threshold = 3
+consecutive_loss_cooldown_seconds = 7200
+poll_interval_seconds = 300
+block_minutes_before_close = 15
+allow_gap_trading = false
+
+
+# =============================================================================
+# [safety]  AI safety gates + live order caps + cooldowns
+# =============================================================================
+[safety]
+# ---- AI entry gates ---------------------------------------------------------
+min_confidence = MEDIUM
+consecutive_loss_threshold = 3
+consecutive_loss_cooldown_minutes = 60
+min_rr_after_fees = 1.2
+
+# ---- Live order size caps ---------------------------------------------------
 max_order_usd = 500
-# Per-source USD caps (AI slot + Fast slot). Omit to fall back to max_order_usd.
 max_order_usd_ai = 500
 max_order_usd_fast = 200
-# Allow AI + Fast positions to be open simultaneously
 double_trade_enabled = false
-# Auto-snap UP to broker minimum lot when required margin <= this fraction of
-# capital. Helps small accounts trade symbols with high min-lot (e.g. CRUDOIL).
-# Set to 0 to disable (refuse any trade below broker min). Default 0.10 (10%).
 max_min_lot_margin_pct = 0.10
-# Require keyboard confirmation before each live order (recommended)
 confirm_orders = true
 
-[execution_engine]
-# Layer 2 real-time execution engine (WebSocket price monitoring)
-# Enables sub-second SL/TP monitoring instead of candle-close-only checks
+# ---- Cooldowns --------------------------------------------------------------
+file_message_expiry = 168
+
+
+# =============================================================================
+# [rag]  News / data feeds
+# =============================================================================
+[rag]
+update_interval_hours = 4
+categories_update_interval_hours = 168
+coingecko_update_interval_hours = 24
+defillama_update_interval_hours = 0.25
+coingecko_global_api_url = https://api.coingecko.com/api/v3/global
+news_limit = 5
+article_max_tokens = 500
+news_filter_sources = true
+# Crypto defaults : cointelegraph,coindesk,theblock,decrypt,bitcoinmagazine
+# MT5/macro       : seekingalpha,invezz,coinpaper,cryptopotato
+news_allowed_feeds = cointelegraph,coindesk,theblock,decrypt,bitcoinmagazine
+
+
+# =============================================================================
+# [dashboard]  Web dashboard
+# =============================================================================
+[dashboard]
 enabled = true
-# Trailing stop — dynamically tightens SL as price moves favorably (ATR-based)
-trailing_enabled = true
-# ATR multiplier for trailing stop distance (e.g., 2.0 = SL trails 2×ATR below peak)
-trailing_atr_multiplier = 2.0
-# Move SL to entry price (breakeven) once the first partial TP target is hit
-trailing_breakeven_on_tp1 = true
-# Partial take-profit — close fractions of position at intermediate targets
-partial_enabled = false
-# Targets as comma-separated "distance_fraction:close_fraction" pairs
-# distance_fraction = how far toward full TP (0.5 = halfway)
-# close_fraction = what % of remaining position to close at that level
-# Default: close 50% at halfway to TP, then 100% at TP
-partial_targets = 0.5:0.5, 1.0:1.0
+# 127.0.0.1 = local only (recommended) | 0.0.0.0 = LAN access
+host = 0.0.0.0
+port = 8000
+enable_cors = false
+cors_origins = *
+
+
+# =============================================================================
+# [debug]  Logging, storage directories, chart debugging
+# =============================================================================
+[debug]
+save_chart_images = false
+chart_save_path = chart_images
+logger_debug = true
+log_dir = logs
+data_dir = data

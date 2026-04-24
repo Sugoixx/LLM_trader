@@ -11,6 +11,7 @@ Logic:
 import numpy as np
 
 from src.indicators.overlap.overlap_indicators import sma_numba
+from src.indicators.trend.trend_indicators import adx_numba
 from .base import AlgoStrategy, AlgoSignal
 
 
@@ -29,7 +30,7 @@ class MACrossoverStrategy(AlgoStrategy):
 
     @property
     def min_bars(self) -> int:
-        return self.slow_period + 2
+        return self.fast_period + self.slow_period + 2
 
     def analyze(self, close, high, low, open_, volume) -> AlgoSignal:
         if len(close) < self.min_bars:
@@ -40,10 +41,36 @@ class MACrossoverStrategy(AlgoStrategy):
                 confidence=0.0,
             )
 
+        # ADX filter - block choppy markets
+        adx_arr, _, _ = adx_numba(high, low, close, 14)
+        if adx_arr[-1] < 25:  # Market too choppy
+            return AlgoSignal(
+                strategy_name=self.name,
+                signal="HOLD",
+                explanation=f"ADX {adx_arr[-1]:.1f} < 25 - no trend",
+                confidence=0.0,
+            )
+
+        # Volume filter - confirm with 1.3x average 20-period volume
+        if len(volume) >= 20:
+            vol_avg = np.mean(volume[-20:])
+            if volume[-1] < vol_avg * 1.3:
+                return AlgoSignal(
+                    strategy_name=self.name,
+                    signal="HOLD",
+                    explanation="Insufficient volume for confirmation",
+                    confidence=0.0,
+                )
+
         ma_fast = sma_numba(close, self.fast_period)
         ma_slow = sma_numba(close, self.slow_period)
 
-        if np.isnan(ma_fast[-1]) or np.isnan(ma_slow[-1]) or np.isnan(ma_fast[-2]) or np.isnan(ma_slow[-2]):
+        if (
+            np.isnan(ma_fast[-1])
+            or np.isnan(ma_slow[-1])
+            or np.isnan(ma_fast[-2])
+            or np.isnan(ma_slow[-2])
+        ):
             return AlgoSignal(
                 strategy_name=self.name,
                 signal="HOLD",
@@ -56,6 +83,8 @@ class MACrossoverStrategy(AlgoStrategy):
         death_cross = ma_fast[-2] >= ma_slow[-2] and ma_fast[-1] < ma_slow[-1]
 
         if golden_cross:
+            ma_diff_pct = abs(ma_fast[-1] - ma_slow[-1]) / ma_slow[-1]
+            confidence = min(0.85, 0.55 + ma_diff_pct * 10)
             return AlgoSignal(
                 strategy_name=self.name,
                 signal="BUY",
@@ -63,10 +92,12 @@ class MACrossoverStrategy(AlgoStrategy):
                     f"Golden Cross: SMA{self.fast_period} ({ma_fast[-1]:.4f}) "
                     f"crossed above SMA{self.slow_period} ({ma_slow[-1]:.4f})."
                 ),
-                confidence=0.60,
+                confidence=round(confidence, 2),
             )
 
         if death_cross:
+            ma_diff_pct = abs(ma_fast[-1] - ma_slow[-1]) / ma_slow[-1]
+            confidence = min(0.85, 0.55 + ma_diff_pct * 10)
             return AlgoSignal(
                 strategy_name=self.name,
                 signal="SELL",
@@ -74,17 +105,16 @@ class MACrossoverStrategy(AlgoStrategy):
                     f"Death Cross: SMA{self.fast_period} ({ma_fast[-1]:.4f}) "
                     f"crossed below SMA{self.slow_period} ({ma_slow[-1]:.4f})."
                 ),
-                confidence=0.60,
+                confidence=round(confidence, 2),
             )
 
-        gap_pct = (ma_fast[-1] - ma_slow[-1]) / ma_slow[-1] * 100 if ma_slow[-1] != 0 else 0
-        direction = "above" if gap_pct > 0 else "below"
+        # No crossover this candle → wait for a new cross
         return AlgoSignal(
             strategy_name=self.name,
             signal="HOLD",
             explanation=(
-                f"SMA{self.fast_period} is {abs(gap_pct):.2f}% {direction} SMA{self.slow_period}. "
-                "No crossover yet."
+                f"No crossover this candle. "
+                f"SMA{self.fast_period}={ma_fast[-1]:.4f}, SMA{self.slow_period}={ma_slow[-1]:.4f}."
             ),
             confidence=0.35,
         )

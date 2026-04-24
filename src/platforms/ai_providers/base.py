@@ -2,6 +2,7 @@
 Base client for AI providers with shared functionality.
 Implements common patterns: context managers, image processing, error handling.
 """
+
 import io
 import re
 from abc import ABC, abstractmethod
@@ -18,7 +19,7 @@ class BaseAIClient(ABC):
         self.logger = logger
         self.api_key: Optional[str] = None
         # Common unsupported parameters to pre-filter
-        self._known_unsupported_params = {'thinking_budget', 'thinking_config', 'top_k'}
+        self._known_unsupported_params = {"thinking_budget", "thinking_config", "top_k"}
 
     async def __aenter__(self):
         """Async context manager entry - calls _initialize_client."""
@@ -49,7 +50,7 @@ class BaseAIClient(ABC):
         model: str,
         messages: List[Dict[str, Any]],
         chart_image: Union[io.BytesIO, bytes, str],
-        model_config: Dict[str, Any]
+        model_config: Dict[str, Any],
     ) -> Optional[ChatResponseModel]:
         """Send a chat completion request with chart image analysis."""
 
@@ -69,7 +70,7 @@ class BaseAIClient(ABC):
             chart_image.seek(0)
             return img_data
         if isinstance(chart_image, str):
-            with open(chart_image, 'rb') as f:
+            with open(chart_image, "rb") as f:
                 return f.read()
         return chart_image
 
@@ -108,72 +109,95 @@ class BaseAIClient(ABC):
         # Use sanitized message for logging and output to ensure security
         error_message_sanitized = self._sanitize_error_message(error_message_raw)
 
-        if "quota" in error_message_lower or "rate limit" in error_message_lower or (
-            "resource_exhausted" in error_message_lower
+        if (
+            "quota" in error_message_lower
+            or "rate limit" in error_message_lower
+            or ("resource_exhausted" in error_message_lower)
         ):
-            self.logger.error("Rate limit or quota exceeded: %s", error_message_sanitized)
-            return ChatResponseModel.from_error(f"rate_limit: {error_message_sanitized}")
-        if "authentication" in error_message_lower or "api key" in error_message_lower or (
-            "invalid_api_key" in error_message_lower
+            self.logger.error(
+                "Rate limit or quota exceeded: %s", error_message_sanitized
+            )
+            return ChatResponseModel.from_error(
+                f"rate_limit: {error_message_sanitized}"
+            )
+        if (
+            "authentication" in error_message_lower
+            or "api key" in error_message_lower
+            or ("invalid_api_key" in error_message_lower)
         ):
             self.logger.error("Authentication error: %s", error_message_sanitized)
-            return ChatResponseModel.from_error(f"authentication: {error_message_sanitized}")
+            return ChatResponseModel.from_error(
+                f"authentication: {error_message_sanitized}"
+            )
         if "timeout" in error_message_lower:
             self.logger.error("Timeout error: %s", error_message_sanitized)
             return ChatResponseModel.from_error(f"timeout: {error_message_sanitized}")
-        if "503" in error_message_raw or "overloaded" in error_message_lower or (
-            "unavailable" in error_message_lower
+        if (
+            "503" in error_message_raw
+            or "overloaded" in error_message_lower
+            or ("unavailable" in error_message_lower)
         ):
-            self.logger.error("Service unavailable/overloaded: %s", error_message_sanitized)
-            return ChatResponseModel.from_error(f"overloaded: {error_message_sanitized}")
+            self.logger.error(
+                "Service unavailable/overloaded: %s", error_message_sanitized
+            )
+            return ChatResponseModel.from_error(
+                f"overloaded: {error_message_sanitized}"
+            )
         if "connection" in error_message_lower or "econnreset" in error_message_lower:
             self.logger.error("Connection error: %s", error_message_sanitized)
-            return ChatResponseModel.from_error(f"connection: {error_message_sanitized}")
+            return ChatResponseModel.from_error(
+                f"connection: {error_message_sanitized}"
+            )
+        if "404" in error_message_raw and "image input" in error_message_lower:
+            self.logger.warning(
+                "Model does not support image input: %s", error_message_sanitized
+            )
+            return ChatResponseModel.from_error(
+                f"unsupported: {error_message_sanitized}"
+            )
         return None
 
     def convert_pydantic_response(
-        self,
-        response: Any,
-        wrapper_attr: Optional[str] = None
+        self, response: Any, wrapper_attr: Optional[str] = None
     ) -> ChatResponseModel:
         """
         Convert any Pydantic SDK response to ChatResponseModel.
         Used by: BlockRun (wrapper_attr='response'), OpenRouter (no wrapper)
-        
+
         Args:
             response: SDK response (Pydantic model)
             wrapper_attr: Unwrap attribute (e.g., 'response' for ChatResponseWithCost)
         """
         if response is None:
             return ChatResponseModel.from_error("Empty response from SDK")
-            
+
         try:
             inner = getattr(response, wrapper_attr) if wrapper_attr else response
         except AttributeError:
             inner = response
-            
+
         try:
             choices_data = []
-            for choice in (inner.choices or []):
+            for choice in inner.choices or []:
                 try:
                     role = choice.message.role
                 except AttributeError:
                     role = "assistant"
-                    
+
                 try:
-                    content = choice.message.content
+                    content = choice.message.content or ""
                 except AttributeError:
                     content = ""
-                    
+
                 try:
                     finish_reason = choice.finish_reason
                 except AttributeError:
                     finish_reason = None
-                    
+
                 choices_data.append(
                     ChoiceModel(
                         message=MessageModel(role=role, content=content),
-                        finish_reason=finish_reason
+                        finish_reason=finish_reason,
                     )
                 )
 
@@ -196,23 +220,24 @@ class BaseAIClient(ABC):
                     total = usage_obj.total_tokens or 0
                 except AttributeError:
                     total = 0
-                usage_model = UsageModel(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total)
+                usage_model = UsageModel(
+                    prompt_tokens=prompt,
+                    completion_tokens=completion,
+                    total_tokens=total,
+                )
 
             try:
                 resp_id = inner.id
             except AttributeError:
                 resp_id = None
-                
+
             try:
                 resp_model = inner.model
             except AttributeError:
                 resp_model = None
 
             return ChatResponseModel(
-                choices=choices_data,
-                usage=usage_model,
-                id=resp_id,
-                model=resp_model
+                choices=choices_data, usage=usage_model, id=resp_id, model=resp_model
             )
         except (AttributeError, TypeError) as e:
             self.logger.error("Failed to create response model: %s", e)
@@ -228,20 +253,24 @@ class BaseAIClient(ABC):
         if match:
             return match.group(1)
         # API error message format 1
-        match = re.search(r"unknown (parameter|argument)[:\s]+['\"]?(\w+)['\"]?", error_msg, re.IGNORECASE)
+        match = re.search(
+            r"unknown (parameter|argument)[:\s]+['\"]?(\w+)['\"]?",
+            error_msg,
+            re.IGNORECASE,
+        )
         if match:
             return match.group(2)
         # API error message format 2 (e.g. "Additional properties are not allowed ('top_k' was unexpected)")
-        match = re.search(r"Additional properties are not allowed \('(\w+)' was unexpected\)", error_msg)
+        match = re.search(
+            r"Additional properties are not allowed \('(\w+)' was unexpected\)",
+            error_msg,
+        )
         if match:
             return match.group(1)
         return None
 
     async def _execute_with_param_retry(
-        self,
-        func: Callable[..., Any],
-        config: Dict[str, Any],
-        **fixed_args: Any
+        self, func: Callable[..., Any], config: Dict[str, Any], **fixed_args: Any
     ) -> Any:
         """
         Execute an SDK function with automatic retry handling for unsupported parameters.
@@ -258,7 +287,9 @@ class BaseAIClient(ABC):
             Exception: If the call fails after retries or for non-parameter reasons
         """
         # Start with a copy of config and pre-filter known unsupported params
-        current_config = {k: v for k, v in config.items() if k not in self._known_unsupported_params}
+        current_config = {
+            k: v for k, v in config.items() if k not in self._known_unsupported_params
+        }
         rejected_params = set()
         max_retries = 3
 
@@ -276,10 +307,19 @@ class BaseAIClient(ABC):
 
                 # If we found a bad parameter that is currently in our config
                 if bad_param and bad_param in current_config:
-                    self.logger.warning("Parameter '%s' not supported by provider/model. Retrying without it (Attempt %s/%s)", bad_param, attempt + 1, max_retries)
+                    self.logger.warning(
+                        "Parameter '%s' not supported by provider/model. Retrying without it (Attempt %s/%s)",
+                        bad_param,
+                        attempt + 1,
+                        max_retries,
+                    )
                     rejected_params.add(bad_param)
                     # Create new config without the bad parameter
-                    current_config = {k: v for k, v in current_config.items() if k not in rejected_params}
+                    current_config = {
+                        k: v
+                        for k, v in current_config.items()
+                        if k not in rejected_params
+                    }
                     continue
 
                 # If it's not a parameter error or we can't identify the parameter, re-raise
@@ -291,7 +331,7 @@ class BaseAIClient(ABC):
         role: str = "assistant",
         usage: Optional[UsageModel] = None,
         model: Optional[str] = None,
-        response_id: Optional[str] = None
+        response_id: Optional[str] = None,
     ) -> ChatResponseModel:
         """
         Create a ChatResponseModel from content.
@@ -312,5 +352,5 @@ class BaseAIClient(ABC):
             role=role,
             usage=usage,
             model=model,
-            response_id=response_id
+            response_id=response_id,
         )

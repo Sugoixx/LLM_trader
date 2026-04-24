@@ -9,6 +9,7 @@ Safety layer (Tier-S):
     trend-following strategies only vote in TRENDING
   - Confidence degradation when ADX is weak
 """
+
 import math
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -17,12 +18,9 @@ from typing import Optional, Tuple, List, Dict, Any
 #: Reversion = good in RANGING.  Trend-following = good in TRENDING.
 #: Names not listed are regime-agnostic (always eligible).
 STRATEGY_REGIME_PREFERENCE: Dict[str, str] = {
-    "Bollinger_Reversion": "RANGING",
-    "BollingerReversion":  "RANGING",
-    "RSI_Crossover":       "RANGING",
-    "RSICrossover":        "RANGING",
-    "MA_Crossover":        "TRENDING",
-    "MACrossover":         "TRENDING",
+    "Bollinger Reversion": "RANGING",
+    "RSI Crossover": "TRENDING",
+    "MA Crossover": "TRENDING",
 }
 
 
@@ -33,27 +31,40 @@ class AlgoFastTrader:
     blocks trades when conditions indicate no directional edge.
     """
 
-    #: Minimum fraction of strategies that must agree (strict majority).
-    MIN_AGREE_RATIO: float = 0.5
+    #: Minimum fraction of strategies that must agree.
+    MIN_AGREE_RATIO: float = 0.67
 
     #: ADX below this → market is choppy, trend-following has no edge.
-    MIN_ADX_FOR_TREND: float = 20.0
+    MIN_ADX_FOR_TREND: float = 25.0
+
+    #: Strategies with confidence below this are excluded from the vote.
+    MIN_STRATEGY_CONFIDENCE: float = 0.55
+
+    #: Maximum allowed drawdown (pause trading if exceeded)
+    MAX_DRAWDOWN_PCT: float = -5.0
 
     #: Chop + high vol = worst conditions for any strategy.
+    #: Safe to keep True — MarketConditionDetector calibrates "HIGH" per instrument:
+    #: CRYPTO=3.0x ATR (rare), FOREX=1.2x (frequent during news), OIL=2.5x.
     BLOCK_HIGH_VOL_CHOP: bool = True
 
     def decide(
         self,
         signals: List[Dict[str, Any]],
         market_condition: Optional[Dict[str, Any]] = None,
+        llm_signal: Optional[str] = None,
     ) -> Tuple[str, str, str]:
         """Derive a trade signal from strategy consensus with regime filtering.
 
         Returns:
             Tuple ``(signal, confidence, reasoning)``.
         """
+        # Include LLM signal if provided
+        if llm_signal:
+            signals = signals + [{"strategy_name": "LLM", "signal": llm_signal}]
+
         if not signals:
-            return "HOLD", "LOW", "Fast trader: no algo signals available"
+            return "HOLD", "LOW", "Fast trader: no signals available"
 
         regime, vol, adx = self._extract_regime(market_condition)
 
@@ -67,27 +78,44 @@ class AlgoFastTrader:
         if not eligible:
             names = ", ".join(s.get("strategy_name", "?") for s in signals)
             return (
-                "HOLD", "LOW",
+                "HOLD",
+                "LOW",
                 f"Fast trader: no regime-appropriate strategies for {regime} "
                 f"(have: [{names}])",
             )
 
-        # ─── Majority vote ───────────────────────────────────────────────
+        # ─── Min confidence filter ────────────────────────────────────────
+        eligible = [
+            s
+            for s in eligible
+            if s.get("confidence", 0.0) >= self.MIN_STRATEGY_CONFIDENCE
+        ]
+        if not eligible:
+            return (
+                "HOLD",
+                "LOW",
+                "Fast trader: all strategies below min confidence threshold",
+            )
+
+        # ─── Confidence-weighted majority vote ───────────────────────────
         n_total = len(eligible)
         buy_sigs = [s for s in eligible if s.get("signal") == "BUY"]
         sell_sigs = [s for s in eligible if s.get("signal") == "SELL"]
-        n_buy = len(buy_sigs)
-        n_sell = len(sell_sigs)
-        min_agree = math.floor(n_total * self.MIN_AGREE_RATIO) + 1
+        w_buy = sum(s.get("confidence", 0.5) for s in buy_sigs)
+        w_sell = sum(s.get("confidence", 0.5) for s in sell_sigs)
+        w_total = sum(s.get("confidence", 0.5) for s in eligible)
+        min_agree_weight = w_total * self.MIN_AGREE_RATIO
 
-        if n_buy > n_sell and n_buy >= min_agree:
-            consensus, agreeing, n_agree = "BUY", buy_sigs, n_buy
-        elif n_sell > n_buy and n_sell >= min_agree:
-            consensus, agreeing, n_agree = "SELL", sell_sigs, n_sell
+        if w_buy > w_sell and w_buy >= min_agree_weight:
+            consensus, agreeing, n_agree = "BUY", buy_sigs, len(buy_sigs)
+        elif w_sell > w_buy and w_sell >= min_agree_weight:
+            consensus, agreeing, n_agree = "SELL", sell_sigs, len(sell_sigs)
         else:
+            n_buy, n_sell = len(buy_sigs), len(sell_sigs)
             names = ", ".join(s.get("strategy_name", "?") for s in eligible)
             return (
-                "HOLD", "LOW",
+                "HOLD",
+                "LOW",
                 f"Fast trader: no consensus — {n_buy} BUY vs {n_sell} SELL "
                 f"across [{names}] (regime={regime})",
             )
@@ -105,9 +133,10 @@ class AlgoFastTrader:
             confidence = self._degrade_confidence(confidence)
 
         agreeing_names = ", ".join(s.get("strategy_name", "?") for s in agreeing)
+        llm_note = " (incl. LLM)" if llm_signal else ""
         reasoning = (
             f"[Fast] {n_agree}/{n_total} eligible agree {consensus} "
-            f"[{agreeing_names}] | regime={regime} vol={vol} ADX={adx:.1f}"
+            f"[{agreeing_names}] | regime={regime} vol={vol} ADX={adx:.1f}{llm_note}"
         )
         return consensus, confidence, reasoning
 
@@ -125,17 +154,14 @@ class AlgoFastTrader:
             adx = 0.0
         return regime, vol, adx
 
-    def _check_regime_quality(
-        self, regime: str, vol: str, adx: float
-    ) -> Optional[str]:
+    def _check_regime_quality(self, regime: str, vol: str, adx: float) -> Optional[str]:
         """Return a blocking reason if regime is too low-quality."""
         if self.BLOCK_HIGH_VOL_CHOP and vol == "HIGH" and adx < self.MIN_ADX_FOR_TREND:
             return (
                 f"Fast trader BLOCKED: HIGH vol + chop (ADX={adx:.1f} < "
                 f"{self.MIN_ADX_FOR_TREND}) — no directional edge"
             )
-        if regime == "UNKNOWN" and adx == 0.0:
-            return "Fast trader BLOCKED: unknown regime, insufficient data"
+        # UNKNOWN regime (no detector data) is not a blocker — proceed without regime info
         return None
 
     @staticmethod
@@ -156,89 +182,17 @@ class AlgoFastTrader:
     @staticmethod
     def _degrade_confidence(c: str) -> str:
         return {"HIGH": "MEDIUM", "MEDIUM": "LOW", "LOW": "LOW"}.get(c, "LOW")
-"""Derives a BUY/SELL/HOLD decision from algo strategy signal consensus.
 
-Used by Fast Trading Mode to execute trades directly on classical strategy
-signals without waiting for LLM analysis each candle.
-"""
-import math
-from typing import Optional, Tuple, List, Dict, Any
-
-
-class AlgoFastTrader:
-    """Convert strategy signal consensus into a trade decision.
-
-    Applies a simple majority-vote across all running strategies.
-    Confidence is mapped to HIGH/MEDIUM/LOW based on agreement strength.
-    """
-
-    #: Minimum fraction of strategies that must agree to act (exclusive majority).
-    MIN_AGREE_RATIO: float = 0.5
-
-    def decide(
-        self,
-        signals: List[Dict[str, Any]],
-        market_condition: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[str, str, str]:
-        """Derive a trade signal from strategy consensus.
-
-        Args:
-            signals: List of signal dicts with keys ``signal``, ``strategy_name``,
-                     ``confidence``, ``explanation`` as produced by StrategySignalLayer.
-            market_condition: Optional market condition dict from MarketConditionDetector.
-
-        Returns:
-            Tuple ``(signal, confidence, reasoning)`` where:
-            - signal: ``"BUY"``, ``"SELL"``, or ``"HOLD"``
-            - confidence: ``"HIGH"``, ``"MEDIUM"``, or ``"LOW"``
-            - reasoning: Human-readable explanation of the decision
-        """
-        if not signals:
-            return "HOLD", "LOW", "Fast trader: no algo signals available"
-
-        n_total = len(signals)
-        buy_sigs = [s for s in signals if s.get("signal") == "BUY"]
-        sell_sigs = [s for s in signals if s.get("signal") == "SELL"]
-        n_buy = len(buy_sigs)
-        n_sell = len(sell_sigs)
-
-        # Strict majority: more than half must agree
-        min_agree = math.floor(n_total * self.MIN_AGREE_RATIO) + 1
-
-        if n_buy > n_sell and n_buy >= min_agree:
-            consensus = "BUY"
-            agreeing = buy_sigs
-            n_agree = n_buy
-        elif n_sell > n_buy and n_sell >= min_agree:
-            consensus = "SELL"
-            agreeing = sell_sigs
-            n_agree = n_sell
-        else:
-            strategy_names = ", ".join(s.get("strategy_name", "?") for s in signals)
+    def _check_drawdown(
+        self, current_capital: float, initial_capital: float
+    ) -> Optional[str]:
+        """Return block reason if drawdown exceeds allowed limit."""
+        if initial_capital <= 0:
+            return None
+        drawdown_pct = ((current_capital - initial_capital) / initial_capital) * 100
+        if drawdown_pct < self.MAX_DRAWDOWN_PCT:
             return (
-                "HOLD",
-                "LOW",
-                f"Fast trader: no consensus — {n_buy} BUY vs {n_sell} SELL "
-                f"across [{strategy_names}]",
+                f"Fast trader BLOCKED: Drawdown {drawdown_pct:.1f}% "
+                f"exceeds {self.MAX_DRAWDOWN_PCT}% limit"
             )
-
-        # Map agreement strength → confidence
-        if n_agree == n_total:
-            confidence = "HIGH"
-        elif n_agree >= math.ceil(n_total * 0.67):
-            confidence = "MEDIUM"
-        else:
-            confidence = "LOW"
-
-        agreeing_names = ", ".join(s.get("strategy_name", "?") for s in agreeing)
-        mc_note = ""
-        if market_condition:
-            mc = market_condition.get("market_condition", "")
-            vol = market_condition.get("volatility_regime", "")
-            mc_note = f" | regime={mc} vol={vol}"
-
-        reasoning = (
-            f"[Fast] {n_agree}/{n_total} strategies agree {consensus} "
-            f"[{agreeing_names}]{mc_note}"
-        )
-        return consensus, confidence, reasoning
+        return None

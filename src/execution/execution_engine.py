@@ -170,8 +170,11 @@ class ExecutionEngine:
         """Process a signal from Layer 1."""
         self.logger.info(
             "[Engine] Signal received: %s %s %s (confidence=%s, rating=%s)",
-            signal.signal_type.name, signal.direction, signal.symbol,
-            signal.confidence, signal.rating,
+            signal.signal_type.name,
+            signal.direction,
+            signal.symbol,
+            signal.confidence,
+            signal.rating,
         )
 
         # ── DecisionGate validation firewall ──────────────────────────
@@ -222,7 +225,8 @@ class ExecutionEngine:
                 except Exception as e:
                     self.logger.error(
                         "[Engine] Failed to push SL/TP update to broker for %s: %s",
-                        signal.symbol, e,
+                        signal.symbol,
+                        e,
                     )
 
         elif signal.signal_type == SignalType.CANCEL:
@@ -253,6 +257,7 @@ class ExecutionEngine:
             trailing = TrailingStopState(
                 enabled=True,
                 atr_multiplier=self.config.EXECUTION_TRAILING_ATR_MULT,
+                atr_multiplier_after_tp1=self.config.EXECUTION_TRAILING_ATR_MULT_AFTER_TP1,
                 atr_value=pos.atr_at_entry if pos.atr_at_entry > 0 else 0.0,
                 breakeven_on_tp1=self.config.EXECUTION_TRAILING_BREAKEVEN,
             )
@@ -288,7 +293,9 @@ class ExecutionEngine:
         tp = pos.take_profit
         targets = []
 
-        for idx, (dist_frac, close_frac) in enumerate(self.config.EXECUTION_PARTIAL_TARGETS, start=1):
+        for idx, (dist_frac, close_frac) in enumerate(
+            self.config.EXECUTION_PARTIAL_TARGETS, start=1
+        ):
             if pos.direction == "LONG":
                 tp_distance = tp - entry
                 target_price = entry + (tp_distance * dist_frac)
@@ -319,7 +326,10 @@ class ExecutionEngine:
             # Partial close — position stays open, just update size
             self.logger.info(
                 "[Engine] [%s] Partial close: %s @ $%.2f, qty=%.6f",
-                source.upper(), reason, price, quantity_closed,
+                source.upper(),
+                reason,
+                price,
+                quantity_closed,
             )
             if pos:
                 pos.size -= quantity_closed
@@ -329,12 +339,16 @@ class ExecutionEngine:
         # Full close — delegate to strategy for brain learning + cleanup
         self.logger.info(
             "[Engine] [%s] Full close: %s @ $%.2f — delegating to TradingStrategy",
-            source.upper(), reason, price,
+            source.upper(),
+            reason,
+            price,
         )
 
         if pos:
             conditions = self.strategy._build_conditions_from_position(pos)
-            await self.strategy._finalize_close(reason, price, conditions, source=source)
+            await self.strategy._finalize_close(
+                reason, price, conditions, source=source
+            )
 
         mon = self.monitors.get(source)
         if mon:

@@ -243,3 +243,81 @@ class GoogleAIClient(BaseAIClient):
         sanitized_error = self._sanitize_error_message(str(exception))
         self.logger.error("Unexpected Google AI error: %s", sanitized_error)
         return None
+
+    @staticmethod
+    def fetch_available_models(api_key: str) -> List[str]:
+        """
+        Query the Google AI API and return the list of model names
+        that support generateContent (i.e. usable for inference).
+
+        Returns short names without the 'models/' prefix, e.g. 'gemini-2.5-flash'.
+        Returns an empty list on any error so callers can degrade gracefully.
+        """
+        try:
+            client = genai.Client(api_key=api_key)
+            available = []
+            for m in client.models.list():
+                name: str = getattr(m, "name", "") or ""
+                # Strip leading 'models/' prefix used by the SDK
+                short = name.removeprefix("models/")
+                # Only keep models that actually support text/chat generation
+                supported_actions = getattr(m, "supported_actions", []) or []
+                if supported_actions and "generateContent" not in supported_actions:
+                    continue
+                if short:
+                    available.append(short)
+            return available
+        except Exception:  # pylint: disable=broad-exception-caught
+            return []
+
+    @staticmethod
+    def resolve_best_model(api_key: str, requested_model: str, logger: "Logger") -> str:
+        """
+        Validate *requested_model* against the live model list.
+        If unavailable, fall back to the best free-tier flash model found.
+        Returns *requested_model* unchanged when the API call fails (safe default).
+
+        Priority for fallback (newest first):
+            gemini-3-flash-preview → gemini-2.5-flash → gemini-2.0-flash → any *flash* → requested_model
+        """
+        available = GoogleAIClient.fetch_available_models(api_key)
+        if not available:
+            # API unreachable at startup — proceed with configured model
+            logger.warning(
+                "Google AI model list unavailable; using configured model: %s", requested_model
+            )
+            return requested_model
+
+        if requested_model in available:
+            logger.debug("Google AI model '%s' confirmed available.", requested_model)
+            return requested_model
+
+        logger.warning(
+            "Google AI model '%s' not in available list %s — selecting best flash fallback.",
+            requested_model,
+            available,
+        )
+
+        # Ordered preference list for free-tier flash models
+        PREFERRED = [
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ]
+        for candidate in PREFERRED:
+            if candidate in available:
+                logger.info("Google AI: falling back to '%s'.", candidate)
+                return candidate
+
+        # Last resort: any flash model from the live list
+        flash_models = [m for m in available if "flash" in m]
+        if flash_models:
+            chosen = flash_models[0]
+            logger.info("Google AI: falling back to first available flash model '%s'.", chosen)
+            return chosen
+
+        # Nothing suitable — keep original and let the request fail naturally
+        logger.warning(
+            "No suitable flash model found; keeping configured model: %s", requested_model
+        )
+        return requested_model

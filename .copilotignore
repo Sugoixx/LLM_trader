@@ -1,0 +1,61 @@
+# Python environment & build
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Version control & git
+.git/
+.gitignore
+
+# Test & coverage
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & cache
+logs/
+cache/
+*.log
+
+# Data & templates (too large)
+data/
+data_template/
+backtest_data/
+chart_images/
+img/
+
+# Graphify outputs (keep graph.md, ignore others)
+graphify-out/cache
+graphify-out/graph.html
+graphify-out/graph.json
+graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/GRAPH_REPORT.md
+
+# Environment files
+*.env
+keys.env
+!keys.env.example
+
+# OS & IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated files
+*.egg
+*.whl
+
+SECURITY_AUDIT.md
+SECURITY_IMMEDIATE_ACTIONS.md
+LICENSE.md
+CONTRIBUTING.md
+FAST_TRADING_ROADMAP.md

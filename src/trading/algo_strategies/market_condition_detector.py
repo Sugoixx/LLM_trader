@@ -41,12 +41,37 @@ _INSTRUMENT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "trend_sensitivity": 0.55,
         "volatility_threshold": 2.5,
     },
+    "CRUDOIL": {
+        "trend_sensitivity": 0.50,
+        "volatility_threshold": 4.0,
+    },
 }
 
-_INDICES_KEYWORDS = {"US30", "US100", "US500", "DE30", "UK100", "JP225", "NAS100", "SPX500", "DAX"}
-_GOLD_KEYWORDS    = {"XAU", "XAG", "GOLD"}
-_FOREX_MAJORS     = {"EUR", "GBP", "USD", "JPY", "CHF", "CAD", "AUD", "NZD"}
-_OIL_KEYWORDS     = {"CRUDOIL", "CRUDE", "WTI", "BRENT", "XTI", "XBR", "OIL", "ENERGY", "NGAS", "NATURALGAS"}
+_INDICES_KEYWORDS = {
+    "US30",
+    "US100",
+    "US500",
+    "DE30",
+    "UK100",
+    "JP225",
+    "NAS100",
+    "SPX500",
+    "DAX",
+}
+_GOLD_KEYWORDS = {"XAU", "XAG", "GOLD"}
+_FOREX_MAJORS = {"EUR", "GBP", "USD", "JPY", "CHF", "CAD", "AUD", "NZD"}
+_OIL_KEYWORDS = {
+    "CRUDOIL",
+    "CRUDE",
+    "WTI",
+    "BRENT",
+    "XTI",
+    "XBR",
+    "OIL",
+    "ENERGY",
+    "NGAS",
+    "NATURALGAS",
+}
 
 
 def _classify_instrument(symbol: str) -> str:
@@ -56,6 +81,9 @@ def _classify_instrument(symbol: str) -> str:
     if any(k in upper for k in _GOLD_KEYWORDS):
         return "GOLD"
     if any(k in upper for k in _OIL_KEYWORDS):
+        # Check if specifically CRUDOIL/XTI/XBR
+        if "CRUDOIL" in upper or "XTI" in upper or "XBR" in upper:
+            return "CRUDOIL"  # New category
         return "COMMODITIES"
     # Heuristic: short alphanumeric pairs that look like forex pairs
     # e.g. EURUSD, GBPJPY — typically 6 chars
@@ -71,7 +99,9 @@ class MarketConditionDetector:
     indicator functions already in LLM_TRADER's indicator layer.
     """
 
-    def __init__(self, adx_period: int = 14, sma_fast: int = 20, sma_slow: int = 50) -> None:
+    def __init__(
+        self, adx_period: int = 14, sma_fast: int = 20, sma_slow: int = 50
+    ) -> None:
         self.adx_period = adx_period
         self.sma_fast = sma_fast
         self.sma_slow = sma_slow
@@ -117,11 +147,19 @@ class MarketConditionDetector:
         fast_slice = ma_fast[-window:]
         slow_slice = ma_slow[-window:]
         valid = ~(np.isnan(fast_slice) | np.isnan(slow_slice))
-        ma_trend = abs((fast_slice[valid] > slow_slice[valid]).mean() - 0.5) * 2 if valid.any() else 0.5
+        ma_trend = (
+            abs((fast_slice[valid] > slow_slice[valid]).mean() - 0.5) * 2
+            if valid.any()
+            else 0.5
+        )
 
         # Return-consistency score
-        returns = np.diff(close[-window:]) / (close[-window - 1:-2] + 1e-12)
-        consistency = min(1.0, abs(returns.mean()) / (returns.std() + 1e-10)) if len(returns) > 1 else 0.5
+        returns = np.diff(close[-window:]) / (close[-window - 1 : -2] + 1e-12)
+        consistency = (
+            min(1.0, abs(returns.mean()) / (returns.std() + 1e-10))
+            if len(returns) > 1
+            else 0.5
+        )
 
         trend_score = adx_trend * 0.4 + ma_trend * 0.3 + consistency * 0.3
 

@@ -20,21 +20,24 @@ if TYPE_CHECKING:
 @dataclass(slots=True, kw_only=True)
 class TrailingStopState:
     """Runtime state for trailing stop on the active position."""
+
     enabled: bool = False
-    atr_multiplier: float = 2.0     # SL trails at entry_ATR * multiplier below peak
-    highest_price: float = 0.0      # LONG: peak since entry
+    atr_multiplier: float = 2.0  # SL trails at entry_ATR * multiplier below peak
+    atr_multiplier_after_tp1: float = 0.2  # Tighter multiplier after breakeven
+    highest_price: float = 0.0  # LONG: peak since entry
     lowest_price: float = float("inf")  # SHORT: trough since entry
-    trailing_sl: float = 0.0        # Current trailing stop level
-    atr_value: float = 0.0          # ATR at position entry
+    trailing_sl: float = 0.0  # Current trailing stop level
+    atr_value: float = 0.0  # ATR at position entry
     # Breakeven mode: move SL to entry price once first partial TP is hit
     breakeven_on_tp1: bool = False
     breakeven_activated: bool = False
-    entry_price: float = 0.0        # Stored for breakeven reference
+    entry_price: float = 0.0  # Stored for breakeven reference
 
 
 @dataclass(slots=True, kw_only=True)
 class PartialCloseState:
     """Runtime state for multi-target partial position closing."""
+
     enabled: bool = False
     # Each target: (price_level, fraction_of_remaining, label)
     targets: List[tuple] = field(default_factory=list)
@@ -118,8 +121,10 @@ class PositionMonitor:
             self._trailing.trailing_sl = position.stop_loss  # Start at fixed SL
             self._trailing.entry_price = position.entry_price
             self.logger.info(
-                "[Monitor] Trailing stop enabled: ATR=%.2f, multiplier=%.1f, breakeven_on_tp1=%s",
-                self._trailing.atr_value, self._trailing.atr_multiplier,
+                "[Monitor] Trailing stop enabled: ATR=%.2f, multiplier=%.1f (→%.1f after TP1), breakeven_on_tp1=%s",
+                self._trailing.atr_value,
+                self._trailing.atr_multiplier,
+                self._trailing.atr_multiplier_after_tp1,
                 self._trailing.breakeven_on_tp1,
             )
         else:
@@ -132,15 +137,19 @@ class PositionMonitor:
             self._partial.remaining_quantity = position.size
             self._partial.hit_indices = []
             self.logger.info(
-                "[Monitor] Partial close enabled: %d targets", len(self._partial.targets)
+                "[Monitor] Partial close enabled: %d targets",
+                len(self._partial.targets),
             )
         else:
             self._partial = None
 
         self.logger.info(
             "[Monitor] Watching %s %s @ $%.2f  SL=$%.2f  TP=$%.2f",
-            position.direction, position.symbol,
-            position.entry_price, position.stop_loss, position.take_profit,
+            position.direction,
+            position.symbol,
+            position.entry_price,
+            position.stop_loss,
+            position.take_profit,
         )
 
     def unregister_position(self) -> None:
@@ -262,9 +271,8 @@ class PositionMonitor:
             if idx in pc.hit_indices:
                 continue
 
-            hit = (
-                (pos.direction == "LONG" and price >= target_price)
-                or (pos.direction == "SHORT" and price <= target_price)
+            hit = (pos.direction == "LONG" and price >= target_price) or (
+                pos.direction == "SHORT" and price <= target_price
             )
             if not hit:
                 continue
@@ -279,7 +287,10 @@ class PositionMonitor:
 
             self.logger.info(
                 "[Partial] %s hit @ $%.2f — closing %.6f (%.0f%% of remaining)",
-                label, price, qty_to_close, fraction * 100,
+                label,
+                price,
+                qty_to_close,
+                fraction * 100,
             )
 
             # Place partial close order
@@ -299,7 +310,8 @@ class PositionMonitor:
                     # Stop monitoring and delegate cleanup to the strategy.
                     self.logger.warning(
                         "[Partial] %s on %s — broker reports no open position; finalizing close.",
-                        label, pos.symbol,
+                        label,
+                        pos.symbol,
                     )
                     await self._handle_external_close(price)
                     return
@@ -310,7 +322,9 @@ class PositionMonitor:
 
             # Notify via callback
             if self._close_callback and result.success:
-                await self._close_callback(self.source, f"partial_{label}", price, qty_to_close)
+                await self._close_callback(
+                    self.source, f"partial_{label}", price, qty_to_close
+                )
 
             # Breakeven mode: move trailing SL to entry price after first partial hit
             if (
@@ -320,11 +334,26 @@ class PositionMonitor:
                 and not self._trailing.breakeven_activated
             ):
                 old_sl = self._trailing.trailing_sl
-                self._trailing.trailing_sl = max(self._trailing.trailing_sl, self._trailing.entry_price)
+                old_mult = self._trailing.atr_multiplier
+                self._trailing.trailing_sl = max(
+                    self._trailing.trailing_sl, self._trailing.entry_price
+                )
+                self._trailing.atr_multiplier = self._trailing.atr_multiplier_after_tp1
+                self._trailing.breakeven_activated = True
+                self.logger.info(
+                    "[Trail] Breakeven activated after %s: SL $%.2f → $%.2f (entry), ATR mult %.1f → %.1f",
+                    label,
+                    old_sl,
+                    self._trailing.trailing_sl,
+                    old_mult,
+                    self._trailing.atr_multiplier,
+                )
                 self._trailing.breakeven_activated = True
                 self.logger.info(
                     "[Trail] Breakeven activated after %s: SL $%.2f → $%.2f (entry)",
-                    label, old_sl, self._trailing.trailing_sl,
+                    label,
+                    old_sl,
+                    self._trailing.trailing_sl,
                 )
 
     # ------------------------------------------------------------------
@@ -360,11 +389,15 @@ class PositionMonitor:
 
         trailing_info = ""
         if self._trailing and reason == "stop_loss":
-            trailing_info = f" (trailing SL=${ self._trailing.trailing_sl:.2f})"
+            trailing_info = f" (trailing SL=${self._trailing.trailing_sl:.2f})"
 
         self.logger.info(
             "[Monitor] %s triggered @ $%.2f for %.6f %s%s",
-            reason.upper(), price, quantity, pos.symbol, trailing_info,
+            reason.upper(),
+            price,
+            quantity,
+            pos.symbol,
+            trailing_info,
         )
 
         result = await self.order_executor.close_order(
@@ -381,11 +414,14 @@ class PositionMonitor:
                 # Broker has no open position (user closed manually or broker-side SL/TP hit)
                 self.logger.warning(
                     "[Monitor] %s — broker reports no open %s position; finalizing close.",
-                    pos.symbol, close_side.upper(),
+                    pos.symbol,
+                    close_side.upper(),
                 )
                 await self._handle_external_close(price)
                 return
-            self.logger.error("[Monitor] Close order FAILED: %s — retrying as market", result.error)
+            self.logger.error(
+                "[Monitor] Close order FAILED: %s — retrying as market", result.error
+            )
             # Fallback to market order for urgent closes
             result = await self.order_executor.close_order(
                 symbol=pos.symbol,
@@ -399,11 +435,14 @@ class PositionMonitor:
                 if getattr(result, "already_closed", False):
                     self.logger.warning(
                         "[Monitor] %s — broker reports no open %s position on fallback; finalizing close.",
-                        pos.symbol, close_side.upper(),
+                        pos.symbol,
+                        close_side.upper(),
                     )
                     await self._handle_external_close(price)
                     return
-                self.logger.error("[Monitor] Market fallback also FAILED: %s", result.error)
+                self.logger.error(
+                    "[Monitor] Market fallback also FAILED: %s", result.error
+                )
                 self._close_in_progress = False
                 return
 
@@ -462,6 +501,7 @@ class PositionMonitor:
                 "lowest_price": self._trailing.lowest_price,
                 "atr_value": self._trailing.atr_value,
                 "atr_multiplier": self._trailing.atr_multiplier,
+                "atr_multiplier_after_tp1": self._trailing.atr_multiplier_after_tp1,
                 "breakeven_activated": self._trailing.breakeven_activated,
             }
 

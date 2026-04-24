@@ -63,24 +63,62 @@ class BollingerReversionStrategy(AlgoStrategy):
         is_uptrend = price > sma_val
         is_downtrend = price < sma_val
 
-        if is_uptrend and prev_low <= lower[-1]:
+        # Volume confirmation: current bar must exceed 1.2× rolling average
+        vol_period = min(20, len(volume))
+        vol_avg = float(np.mean(volume[-vol_period:])) if vol_period > 0 else 0.0
+        vol_confirmed = float(volume[-1]) > 1.2 * vol_avg if vol_avg > 0 else False
+        if prev_low <= lower[-1]:
+            if not vol_confirmed:
+                return AlgoSignal(
+                    strategy_name=self.name,
+                    signal="HOLD",
+                    explanation=(
+                        f"Lower band touch at {prev_low:.4f} but volume too low "
+                        f"({volume[-1]:.0f} < 1.2× avg {vol_avg:.0f}). Skipping."
+                    ),
+                    confidence=0.35,
+                )
             return AlgoSignal(
                 strategy_name=self.name,
                 signal="BUY",
                 explanation=(
-                    f"Uptrend (price {price:.4f} > SMA200 {sma_val:.4f}) "
-                    f"& price touched lower band ({lower[-1]:.4f}). Oversold reversion."
+                    f"Price touched lower band ({lower[-1]:.4f}) at {prev_low:.4f}. "
+                    f"Trend: {'up' if is_uptrend else 'down' if is_downtrend else 'side'}. "
+                    f"Oversold reversion (vol confirmed)."
                 ),
-                confidence=0.70,
+                confidence=0.70 if is_uptrend else 0.50,
             )
 
-        if is_downtrend and prev_high >= upper[-1]:
+        if prev_high >= upper[-1]:
+            if not vol_confirmed:
+                return AlgoSignal(
+                    strategy_name=self.name,
+                    signal="HOLD",
+                    explanation=(
+                        f"Upper band touch at {prev_high:.4f} but volume too low "
+                        f"({volume[-1]:.0f} < 1.2× avg {vol_avg:.0f}). Skipping."
+                    ),
+                    confidence=0.35,
+                )
+            # Avoid selling in uptrend - only sell in downtrend
+            if is_uptrend:
+                return AlgoSignal(
+                    strategy_name=self.name,
+                    signal="HOLD",
+                    explanation=(
+                        f"Price touched upper band ({upper[-1]:.4f}) at {prev_high:.4f} "
+                        f"but trend is UP (price {price:.4f} > SMA{self.trend_period} {sma_val:.4f}). "
+                        f"Avoiding sell in uptrend."
+                    ),
+                    confidence=0.30,
+                )
             return AlgoSignal(
                 strategy_name=self.name,
                 signal="SELL",
                 explanation=(
-                    f"Downtrend (price {price:.4f} < SMA200 {sma_val:.4f}) "
-                    f"& price touched upper band ({upper[-1]:.4f}). Overbought reversion."
+                    f"Price touched upper band ({upper[-1]:.4f}) at {prev_high:.4f}. "
+                    f"Trend: down (price {price:.4f} < SMA{self.trend_period} {sma_val:.4f}). "
+                    f"Overbought reversion (vol confirmed)."
                 ),
                 confidence=0.70,
             )
@@ -101,7 +139,11 @@ class BollingerReversionStrategy(AlgoStrategy):
         #     )
 
         # Inside bands – no actionable signal
-        band_pct = (price - lower[-1]) / (upper[-1] - lower[-1]) * 100 if upper[-1] != lower[-1] else 50
+        band_pct = (
+            (price - lower[-1]) / (upper[-1] - lower[-1]) * 100
+            if upper[-1] != lower[-1]
+            else 50
+        )
         return AlgoSignal(
             strategy_name=self.name,
             signal="HOLD",

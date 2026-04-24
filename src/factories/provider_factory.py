@@ -45,18 +45,25 @@ class ProviderFactory:
 
         # Initialize Google AI client if API key is available
         if self.config.GOOGLE_STUDIO_API_KEY:
+            # Resolve the best available model at startup so stale model names
+            # in config.ini never cause silent failures.
+            resolved_model = GoogleAIClient.resolve_best_model(
+                self.config.GOOGLE_STUDIO_API_KEY,
+                self.config.GOOGLE_STUDIO_MODEL,
+                self.logger,
+            )
             google_client = GoogleAIClient(
                 api_key=self.config.GOOGLE_STUDIO_API_KEY,
-                model=self.config.GOOGLE_STUDIO_MODEL,
+                model=resolved_model,
                 logger=self.logger
             )
-            self.logger.debug("Google AI client initialized")
+            self.logger.debug("Google AI client initialized (model: %s)", resolved_model)
 
             # Initialize paid client if paid API key is available
             if self.config.GOOGLE_STUDIO_PAID_API_KEY:
                 google_paid_client = GoogleAIClient(
                     api_key=self.config.GOOGLE_STUDIO_PAID_API_KEY,
-                    model=self.config.GOOGLE_STUDIO_MODEL,
+                    model=resolved_model,
                     logger=self.logger
                 )
                 self.logger.debug("Google AI paid client initialized as fallback for overloaded free tier")

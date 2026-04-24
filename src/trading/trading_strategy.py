@@ -1,7 +1,7 @@
 """Trading strategy that wraps analysis with position management."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, Dict, TYPE_CHECKING
 
 from src.logger.logger import Logger
@@ -492,7 +492,9 @@ class TradingStrategy:
                 if getattr(order_result, "already_closed", False):
                     self.logger.warning(
                         "[%s] Position already closed externally — "
-                        "finalizing locally (slot=%s)", source.upper(), source,
+                        "finalizing locally (slot=%s)",
+                        source.upper(),
+                        source,
                     )
                 else:
                     self.logger.error(
@@ -665,7 +667,8 @@ class TradingStrategy:
         """
         self.logger.info(
             "[process_analysis] ENTER symbol=%s open_slots=%s",
-            symbol, list(self.positions.keys()),
+            symbol,
+            list(self.positions.keys()),
         )
         async with self._position_lock:
             return await self._process_analysis_inner(analysis_result, symbol)
@@ -745,6 +748,16 @@ class TradingStrategy:
             # Extract market conditions for brain learning
             market_conditions = self._extract_market_conditions(analysis_result)
 
+            # Block SELL signals in bullish trends - avoid selling in uptrend
+            if signal == "SELL":
+                trend_dir = market_conditions.get("trend_direction", "NEUTRAL")
+                if trend_dir == "BULLISH":
+                    self.logger.warning(
+                        "[SELL-BLOCKED] SELL signal in BULLISH trend (%s) — avoiding sell in uptrend.",
+                        trend_dir,
+                    )
+                    return None
+
             # Extract confluence factors for brain learning (Feature 1)
             confluence_factors = self._extract_confluence_factors(analysis_result)
 
@@ -757,23 +770,37 @@ class TradingStrategy:
                 # CLOSE decision and miss the reverse entry until the next
                 # candle — matching the prompt's "REVERSAL RULE".
                 current_dir = self.current_position.direction
+
+                # UPDATE/CLOSE signals: route directly without [BUY-BLOCKED] warning
+                if signal in ("UPDATE", "CLOSE") or signal.startswith("CLOSE_"):
+                    return await self._handle_existing_position(
+                        signal,
+                        confidence,
+                        stop_loss,
+                        take_profit,
+                        current_price,
+                        symbol,
+                        reasoning,
+                        market_conditions,
+                    )
+
                 signal_dir = (
-                    "LONG" if signal == "BUY"
-                    else "SHORT" if signal == "SELL"
-                    else None
+                    "LONG" if signal == "BUY" else "SHORT" if signal == "SELL" else None
                 )
                 is_reversal = signal_dir is not None and signal_dir != current_dir
                 if is_reversal:
                     self.logger.info(
                         "[REVERSAL] %s signal while %s open \u2014 closing then "
                         "opening %s in same cycle.",
-                        signal, current_dir, signal_dir,
+                        signal,
+                        current_dir,
+                        signal_dir,
                     )
-                    slot_source = getattr(
-                        self.current_position, "source", "ai"
-                    ) or "ai"
+                    slot_source = getattr(self.current_position, "source", "ai") or "ai"
                     await self.close_position(
-                        "reversal", current_price, market_conditions,
+                        "reversal",
+                        current_price,
+                        market_conditions,
                         source=slot_source,
                     )
                     # Fall through to _open_new_position below (position dict
@@ -783,7 +810,8 @@ class TradingStrategy:
                         "[BUY-BLOCKED] Existing %s position on %s (slot=%s) \u2014 "
                         "routing %s signal to update/close logic instead of opening new entry. "
                         "Enable double_trade_enabled=true in [live_trading] to allow a parallel slot.",
-                        current_dir, symbol,
+                        current_dir,
+                        symbol,
                         getattr(self.current_position, "source", "?"),
                         signal,
                     )
@@ -800,6 +828,42 @@ class TradingStrategy:
 
             # Handle new position
             if signal in ("BUY", "SELL"):
+                # Block LOW confidence trades — win rate 17%, not worth the risk
+                if confidence == "LOW":
+                    self.logger.warning(
+                        "[BUY-BLOCKED] LOW confidence %s on %s — trade blocked "
+                        "(debate or model returned low conviction). Treating as HOLD.",
+                        signal,
+                        symbol,
+                    )
+                    return None
+                # Block MEDIUM if config min_confidence = HIGH or brain recommends
+                if confidence == "MEDIUM":
+                    min_conf = (
+                        getattr(self.config, "AI_MIN_CONFIDENCE", "MEDIUM")
+                    ).upper()
+                    if min_conf == "HIGH":
+                        self.logger.warning(
+                            "[BUY-BLOCKED] MEDIUM confidence %s on %s — "
+                            "config min_confidence=HIGH. Treating as HOLD.",
+                            signal,
+                            symbol,
+                        )
+                        return None
+                    try:
+                        rec = self.brain_service.get_confidence_recommendation()
+                        if rec and "MEDIUM" in rec and "outperforming" not in rec:
+                            self.logger.warning(
+                                "[BUY-BLOCKED] MEDIUM confidence %s on %s — "
+                                "brain shows MEDIUM win rate <60%%. Treating as HOLD. "
+                                "Recommendation: %s",
+                                signal,
+                                symbol,
+                                rec,
+                            )
+                            return None
+                    except Exception:
+                        pass  # Fail open if brain check errors
                 return await self._open_new_position(
                     signal,
                     confidence,
@@ -823,7 +887,10 @@ class TradingStrategy:
                 self.logger.warning(
                     "[BUY-BLOCKED] LLM emitted %s with NO open position on %s "
                     "(confidence=%s) — ignoring. Treat as HOLD. Reasoning: %s",
-                    signal, symbol, confidence, (reasoning or "")[:200],
+                    signal,
+                    symbol,
+                    confidence,
+                    (reasoning or "")[:200],
                 )
                 return None
 
@@ -1091,13 +1158,13 @@ class TradingStrategy:
         # If another slot already has a position and DOUBLE_TRADE is off,
         # refuse the new open. Also refuse if this same slot already has
         # a position (should be caught by caller but defensive).
-        double_trade_enabled = bool(
-            getattr(self.config, "DOUBLE_TRADE_ENABLED", False)
-        )
+        double_trade_enabled = bool(getattr(self.config, "DOUBLE_TRADE_ENABLED", False))
         if source in self.positions:
             self.logger.warning(
                 "[BUY-BLOCKED] [%s] Slot '%s' already has a position on %s — skipping new open",
-                source.upper(), source, self.positions[source].symbol,
+                source.upper(),
+                source,
+                self.positions[source].symbol,
             )
             return None
         if not double_trade_enabled and self.positions:
@@ -1106,9 +1173,30 @@ class TradingStrategy:
                 "[BUY-BLOCKED] [%s] double_trade_enabled=false and another slot is open (%s). "
                 "Refusing new open for source '%s'. "
                 "Enable double_trade_enabled=true in [live_trading] to allow a parallel slot.",
-                source.upper(), other_sources, source,
+                source.upper(),
+                other_sources,
+                source,
             )
             return None
+
+        # ── AI Safety Gates (source='ai' only — fast has its own guards) ──
+        if source == "ai":
+            blocked_reason = self._check_ai_safety_gates(
+                confidence=confidence,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                current_price=current_price,
+                signal=signal,
+                debate_result=debate_result,
+            )
+            if blocked_reason:
+                self.logger.warning(
+                    "[BUY-BLOCKED] [AI] %s on %s — %s",
+                    signal,
+                    symbol,
+                    blocked_reason,
+                )
+                return None
 
         # Netting-safe gate: if broker is in NETTING mode, an opposing
         # position on the same symbol is impossible. Piggybacking a same-side
@@ -1124,15 +1212,16 @@ class TradingStrategy:
                     executor = self.order_executor
                     hedging_mode = True
                     if executor is not None:
-                        hedging_mode = bool(
-                            getattr(executor, "hedging_mode", True)
-                        )
+                        hedging_mode = bool(getattr(executor, "hedging_mode", True))
                     if not hedging_mode:
                         self.logger.warning(
                             "[BUY-BLOCKED] [%s] Broker NETTING mode — cannot open "
                             "opposing %s position on %s while slot '%s' holds %s.",
-                            source.upper(), direction, symbol,
-                            other_src, other_dir,
+                            source.upper(),
+                            direction,
+                            symbol,
+                            other_src,
+                            other_dir,
                         )
                         return None
 
@@ -1175,7 +1264,8 @@ class TradingStrategy:
             sugg = risk_assessment.capital_suggestion or {}
             self.logger.warning(
                 "[BUY-BLOCKED] [%s] Risk/sizing refused for %s: %s",
-                source.upper(), symbol,
+                source.upper(),
+                symbol,
                 risk_assessment.sizing_warning,
             )
             if sugg:
@@ -1278,7 +1368,10 @@ class TradingStrategy:
             self.logger.warning(
                 "[BUY-BLOCKED] [%s] Order value $%.2f exceeds per-source USD cap $%.2f "
                 "(config: LIVE_MAX_ORDER_USD_%s / LIVE_MAX_ORDER_USD)",
-                source.upper(), order_value_usd, max_usd, source.upper(),
+                source.upper(),
+                order_value_usd,
+                max_usd,
+                source.upper(),
             )
             return None
 
@@ -1337,7 +1430,8 @@ class TradingStrategy:
             if not order_result.success:
                 self.logger.error(
                     "[BUY-BLOCKED] [%s] Broker order execution FAILED: %s — reverting position",
-                    source.upper(), order_result.error,
+                    source.upper(),
+                    order_result.error,
                 )
                 self.positions.pop(source, None)
                 await self._persist_positions()
@@ -1347,6 +1441,39 @@ class TradingStrategy:
                 entry_fee = order_result.fee
             if order_result.avg_price > 0:
                 current_price = order_result.avg_price
+
+            # Attach SL/TP to the broker position immediately after entry.
+            # MT5 orders placed via open_order() don't carry SL/TP; without
+            # this step the broker would show an unprotected position until
+            # the next UPDATE signal.
+            try:
+                ok = await self.order_executor.modify_position(
+                    symbol,
+                    final_sl,
+                    final_tp,
+                    source=source,
+                )
+                if ok:
+                    self.logger.info(
+                        "[%s] SL/TP attached to broker position: SL=$%.5f TP=$%.5f",
+                        source.upper(),
+                        final_sl,
+                        final_tp,
+                    )
+                else:
+                    self.logger.warning(
+                        "[%s] Broker refused SL/TP attach (SL=$%.5f TP=$%.5f) — "
+                        "position opened WITHOUT protection.",
+                        source.upper(),
+                        final_sl,
+                        final_tp,
+                    )
+            except Exception as e:
+                self.logger.error(
+                    "[%s] Failed to attach SL/TP to broker position: %s",
+                    source.upper(),
+                    e,
+                )
 
         # Create and save decision (store size_pct for history context)
         decision = TradeDecision(
@@ -1395,7 +1522,7 @@ class TradingStrategy:
         new_sl = self.current_position.stop_loss
         new_tp = self.current_position.take_profit
 
-        if stop_loss and stop_loss != self.current_position.stop_loss:
+        if stop_loss and abs(stop_loss - self.current_position.stop_loss) > 1e-6:
             direction = self.current_position.direction
             old_sl = self.current_position.stop_loss
             # FULL AI AUTONOMY: Allow AI to move stop loss in any direction
@@ -1420,7 +1547,7 @@ class TradingStrategy:
                 self.logger.info("Updated Stop Loss: $%s", f"{stop_loss:,.2f}")
                 updated = True
 
-        if take_profit and take_profit != self.current_position.take_profit:
+        if take_profit and abs(take_profit - self.current_position.take_profit) > 1e-6:
             new_tp = take_profit
             self.logger.info("Updated Take Profit: $%s", f"{take_profit:,.2f}")
             updated = True
@@ -1433,6 +1560,16 @@ class TradingStrategy:
                 new_take_profit=new_tp,
             )
             await self.persistence.async_save_position(self.current_position)
+            # Propagate SL/TP change to the broker (MT5 / Live) immediately.
+            if self.order_executor:
+                _symbol = self.current_position.symbol
+                _source = getattr(self.current_position, "source", "ai") or "ai"
+                try:
+                    await self.order_executor.modify_position(
+                        _symbol, new_sl, new_tp, source=_source
+                    )
+                except Exception as e:
+                    self.logger.error("Failed to send SL/TP update to broker: %s", e)
 
         return updated
 
@@ -1571,6 +1708,29 @@ class TradingStrategy:
                     return None
                 if order_result.avg_price > 0:
                     current_price = order_result.avg_price
+
+                # Attach SL/TP to the broker position (MT5 / Live).
+                try:
+                    ok = await self.order_executor.modify_position(
+                        symbol,
+                        risk_assessment.stop_loss,
+                        risk_assessment.take_profit,
+                        source="ai",
+                    )
+                    if ok:
+                        self.logger.info(
+                            "[MANUAL] SL/TP attached to broker: SL=$%.5f TP=$%.5f",
+                            risk_assessment.stop_loss,
+                            risk_assessment.take_profit,
+                        )
+                    else:
+                        self.logger.warning(
+                            "[MANUAL] Broker refused SL/TP attach — position opened WITHOUT protection."
+                        )
+                except Exception as e:
+                    self.logger.error(
+                        "[MANUAL] Failed to attach SL/TP to broker: %s", e
+                    )
 
             decision = TradeDecision(
                 timestamp=datetime.now(timezone.utc),
@@ -1944,3 +2104,187 @@ class TradingStrategy:
         except asyncio.TimeoutError:
             self.logger.warning("Live order confirmation timed out (60s) — cancelled")
             return False
+
+    # ── AI Safety Gates ─────────────────────────────────────────────────────
+
+    _CONFIDENCE_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+    _CLOSE_ACTIONS = frozenset({"CLOSE", "CLOSE_LONG", "CLOSE_SHORT"})
+
+    def _check_ai_safety_gates(
+        self,
+        confidence: str,
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+        current_price: float,
+        signal: str,
+        debate_result=None,
+    ) -> Optional[str]:
+        """Pre-entry safety checks for AI trades.
+
+        Returns a human-readable block reason if any gate triggers,
+        or None when all gates pass. Invoked in ``_open_new_position``
+        only when ``source='ai'``.
+
+        Gates:
+          1. Minimum confidence (blocks LOW by default)
+          2. Consecutive-loss cooldown (pauses after N losses in a row)
+          3. Minimum RR after round-trip fees (blocks trades too tight to
+             overcome fees)
+        """
+        if self.config is None:
+            return None
+
+        # Gate 1 — Min confidence --------------------------------------------
+        min_conf = getattr(self.config, "AI_MIN_CONFIDENCE", "LOW")
+        required_rank = self._CONFIDENCE_RANK.get(min_conf, 1)
+        actual_rank = self._CONFIDENCE_RANK.get(str(confidence).upper().strip(), 1)
+        if actual_rank < required_rank:
+            return (
+                f"confidence={confidence} below required min={min_conf} "
+                f"(config [ai_safety].min_confidence)"
+            )
+
+        # Gate 1.5 — Debate verdict ------------------------------------------
+        if debate_result and hasattr(debate_result, "verdict"):
+            blocked_verdicts = getattr(
+                self.config, "AI_BLOCKED_DEBATE_VERDICTS", ["NEUTRAL"]
+            )
+            if debate_result.verdict in blocked_verdicts:
+                return (
+                    f"debate verdict={debate_result.verdict} is blocked "
+                    f"(config [ai_safety].blocked_debate_verdicts)"
+                )
+
+        # Gate 2 — Consecutive-loss cooldown ---------------------------------
+        loss_threshold = int(getattr(self.config, "AI_CONSECUTIVE_LOSS_THRESHOLD", 0))
+        if loss_threshold > 0:
+            block_reason = self._check_consecutive_loss_cooldown(loss_threshold)
+            if block_reason:
+                return block_reason
+
+        # Gate 3 — Min RR after fees -----------------------------------------
+        min_rr = float(getattr(self.config, "AI_MIN_RR_AFTER_FEES", 0.0))
+        if min_rr > 0 and stop_loss and take_profit and current_price > 0:
+            rr_reason = self._check_min_rr_after_fees(
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                current_price=current_price,
+                signal=signal,
+                min_rr=min_rr,
+            )
+            if rr_reason:
+                return rr_reason
+
+        return None
+
+    def _check_consecutive_loss_cooldown(self, threshold: int) -> Optional[str]:
+        """Block if last N closed AI trades in history are all losses."""
+        try:
+            history = self.persistence.load_trade_history() or []
+        except Exception as e:
+            self.logger.debug("Safety gate: failed to load history: %s", e)
+            return None
+
+        # Walk history in reverse, count loss streak from most recent close
+        streak = 0
+        last_loss_ts: Optional[datetime] = None
+        for row in reversed(history):
+            action = row.get("action", "")
+            if action not in self._CLOSE_ACTIONS:
+                continue
+            pnl_pct = self._extract_pnl_from_row(row)
+            if pnl_pct is None:
+                break
+            if pnl_pct < 0:
+                streak += 1
+                if last_loss_ts is None:
+                    ts_str = row.get("timestamp")
+                    if ts_str:
+                        try:
+                            ts = datetime.fromisoformat(ts_str)
+                            last_loss_ts = (
+                                ts.replace(tzinfo=timezone.utc)
+                                if ts.tzinfo is None
+                                else ts
+                            )
+                        except (ValueError, TypeError):
+                            pass
+            else:
+                break
+
+        if streak < threshold or last_loss_ts is None:
+            return None
+
+        cooldown_min = int(
+            getattr(self.config, "AI_CONSECUTIVE_LOSS_COOLDOWN_MINUTES", 60)
+        )
+        cooldown_until = last_loss_ts + timedelta(minutes=cooldown_min)
+        now = datetime.now(timezone.utc)
+        if now >= cooldown_until:
+            return None
+
+        remaining_min = int((cooldown_until - now).total_seconds() / 60)
+        return (
+            f"consecutive-loss cooldown active: {streak} losses in a row, "
+            f"{remaining_min}min remaining "
+            f"(config [ai_safety].consecutive_loss_threshold={threshold})"
+        )
+
+    def _check_min_rr_after_fees(
+        self,
+        stop_loss: float,
+        take_profit: float,
+        current_price: float,
+        signal: str,
+        min_rr: float,
+    ) -> Optional[str]:
+        """Block if net reward (after round-trip fees) / risk < threshold."""
+        fee_pct = float(getattr(self.config, "TRANSACTION_FEE_PERCENT", 0.00075))
+        round_trip_fee = 2.0 * fee_pct
+
+        if signal == "BUY":
+            reward_pct = (take_profit - current_price) / current_price
+            risk_pct = (current_price - stop_loss) / current_price
+        else:  # SELL / SHORT
+            reward_pct = (current_price - take_profit) / current_price
+            risk_pct = (stop_loss - current_price) / current_price
+
+        if risk_pct <= 0 or reward_pct <= 0:
+            # Invalid levels — let RiskManager handle/correct downstream
+            return None
+
+        net_reward = reward_pct - round_trip_fee
+        if net_reward <= 0:
+            return (
+                f"TP too tight vs fees: net_reward={net_reward * 100:+.3f}% "
+                f"after {round_trip_fee * 100:.3f}% round-trip fees "
+                f"(config [ai_safety].min_rr_after_fees={min_rr})"
+            )
+
+        rr_net = net_reward / risk_pct
+        if rr_net < min_rr:
+            return (
+                f"RR after fees too low: {rr_net:.2f} < {min_rr} "
+                f"(TP:+{reward_pct * 100:.2f}%, SL:-{risk_pct * 100:.2f}%, "
+                f"fees:{round_trip_fee * 100:.3f}%)"
+            )
+        return None
+
+    @staticmethod
+    def _extract_pnl_from_row(row: Dict[str, Any]) -> Optional[float]:
+        """Extract P&L % from a trade history row (direct field or reasoning)."""
+        for key in ("pnl_pct", "pnl_percent", "pnl_percentage"):
+            if key in row and row[key] is not None:
+                try:
+                    return float(row[key])
+                except (TypeError, ValueError):
+                    pass
+        reasoning = row.get("reasoning", "")
+        if isinstance(reasoning, str) and "P&L:" in reasoning:
+            try:
+                frag = reasoning.split("P&L:")[1].strip()
+                num = frag.split("%")[0].strip().replace("+", "")
+                return float(num)
+            except (IndexError, ValueError):
+                pass
+        return None

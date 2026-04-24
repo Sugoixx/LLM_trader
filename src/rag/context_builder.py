@@ -13,13 +13,22 @@ from src.logger.logger import Logger
 from src.utils.profiler import profile_performance
 from src.utils.token_counter import TokenCounter
 
-ArticleContent = namedtuple('ArticleContent', ['title', 'body', 'categories', 'tags', 'detected_coins'])
+ArticleContent = namedtuple(
+    "ArticleContent", ["title", "body", "categories", "tags", "detected_coins"]
+)
 FIELD_WEIGHTS = {"title": 10, "body": 3, "categories": 5, "tags": 4}
+
 
 class ContextBuilder:
     """Builds analysis context from various data sources."""
 
-    def __init__(self, logger: Logger, token_counter: TokenCounter, config=None, article_processor=None):
+    def __init__(
+        self,
+        logger: Logger,
+        token_counter: TokenCounter,
+        config=None,
+        article_processor=None,
+    ):
         self.logger = logger
         self.config = config
         self.token_counter = token_counter
@@ -27,10 +36,15 @@ class ContextBuilder:
         self.latest_article_urls: Dict[str, str] = {}
 
     @profile_performance
-    async def keyword_search(self, query: str, news_database: List[Dict[str, Any]],
-                           symbol: Optional[str] = None, coin_index: Dict[str, List[int]] = None,
-                           category_word_map: Dict[str, str] = None,
-                           important_categories: Set[str] = None) -> List[Tuple[int, float]]:
+    async def keyword_search(
+        self,
+        query: str,
+        news_database: List[Dict[str, Any]],
+        symbol: Optional[str] = None,
+        coin_index: Dict[str, List[int]] = None,
+        category_word_map: Dict[str, str] = None,
+        important_categories: Set[str] = None,
+    ) -> List[Tuple[int, float]]:
         """Search for articles matching keywords with relevance scores."""
         # Provide default empty containers to avoid mutable defaults
         coin_index = coin_index or {}
@@ -38,7 +52,7 @@ class ContextBuilder:
         important_categories = important_categories or set()
 
         query = query.lower()
-        keywords = set(re.findall(r'\b\w{3,15}\b', query))
+        keywords = set(re.findall(r"\b\w{3,15}\b", query))
 
         coin = None
         coin_patterns = None
@@ -46,9 +60,9 @@ class ContextBuilder:
             coin = self.article_processor.extract_base_coin(symbol).upper()
             coin_lower = coin.lower()
             coin_patterns = {
-                'coin_pattern': re.compile(rf'\b{re.escape(coin_lower)}\b'),
-                'title_start_pattern': re.compile(rf'^\s*{re.escape(coin_lower)}\b'),
-                'price_pattern': re.compile(rf'\b{re.escape(coin_lower)}\s+price\b')
+                "coin_pattern": re.compile(rf"\b{re.escape(coin_lower)}\b"),
+                "title_start_pattern": re.compile(rf"^\s*{re.escape(coin_lower)}\b"),
+                "price_pattern": re.compile(rf"\b{re.escape(coin_lower)}\s+price\b"),
             }
 
         # Pre-calculate relevant categories based on query
@@ -63,8 +77,13 @@ class ContextBuilder:
 
         for i, article in enumerate(news_database):
             score = self._calculate_article_relevance(
-                article, keywords, coin, current_time,
-                relevant_categories, important_categories, coin_patterns
+                article,
+                keywords,
+                coin,
+                current_time,
+                relevant_categories,
+                important_categories,
+                coin_patterns,
             )
             if score > 0:
                 scores.append((i, score))
@@ -72,20 +91,31 @@ class ContextBuilder:
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores
 
-    def _calculate_article_relevance(self, article: Dict[str, Any], keywords: Set[str],
-                                   coin: Optional[str],
-                                   current_time: float, relevant_categories: List[str],
-                                   important_categories: Set[str],
-                                   coin_patterns: Optional[Dict[str, Any]] = None) -> float:
+    def _calculate_article_relevance(
+        self,
+        article: Dict[str, Any],
+        keywords: Set[str],
+        coin: Optional[str],
+        current_time: float,
+        relevant_categories: List[str],
+        important_categories: Set[str],
+        coin_patterns: Optional[Dict[str, Any]] = None,
+    ) -> float:
         """Calculate article relevance score based on various factors."""
         # Extract article content
         content = self._extract_article_content(article)
 
         # Calculate base scores
         keyword_score = self._calculate_keyword_score(keywords, content)
-        category_score = self._calculate_category_score(relevant_categories, content.categories)
-        coin_score = self._calculate_coin_score(coin, content, coin_patterns) if coin else 0.0
-        importance_score = self._calculate_importance_score(content.categories, important_categories)
+        category_score = self._calculate_category_score(
+            relevant_categories, content.categories
+        )
+        coin_score = (
+            self._calculate_coin_score(coin, content, coin_patterns) if coin else 0.0
+        )
+        importance_score = self._calculate_importance_score(
+            content.categories, important_categories
+        )
 
         # Apply recency weighting
         pub_time = self.article_processor.get_article_timestamp(article)
@@ -99,13 +129,19 @@ class ContextBuilder:
 
         # Demote articles with zero coin relevance when analyzing a specific symbol
         coin_relevance_mult = 1.0
-        if coin and coin_score == 0 and article.get('id') != 'market_overview':
+        if coin and coin_score == 0 and article.get("id") != "market_overview":
             coin_relevance_mult = 0.3
 
-        final_score = base_score * density_mult * cooc_mult * coin_relevance_mult * (0.3 + 0.7 * recency)
+        final_score = (
+            base_score
+            * density_mult
+            * cooc_mult
+            * coin_relevance_mult
+            * (0.3 + 0.7 * recency)
+        )
 
         # Special boost for market overview
-        if article.get('id') == 'market_overview':
+        if article.get("id") == "market_overview":
             final_score += 10
 
         return final_score
@@ -114,11 +150,13 @@ class ContextBuilder:
         """Extract and normalize article content for scoring."""
         # Use pre-computed lowercase fields if available (from NewsManager), otherwise compute on the fly
         return ArticleContent(
-            title=article.get('title_lower') or article.get('title', '').lower(),
-            body=article.get('body_lower') or article.get('body', '').lower(),
-            categories=article.get('categories_lower') or article.get('categories', '').lower(),
-            tags=article.get('tags_lower') or article.get('tags', '').lower(),
-            detected_coins=article.get('detected_coins_str_lower') or article.get('detected_coins_str', '').lower()
+            title=article.get("title_lower") or article.get("title", "").lower(),
+            body=article.get("body_lower") or article.get("body", "").lower(),
+            categories=article.get("categories_lower")
+            or article.get("categories", "").lower(),
+            tags=article.get("tags_lower") or article.get("tags", "").lower(),
+            detected_coins=article.get("detected_coins_str_lower")
+            or article.get("detected_coins_str", "").lower(),
         )
 
     def _calculate_keyword_score(self, keywords: Set[str], content) -> float:
@@ -132,7 +170,9 @@ class ContextBuilder:
                     score += weight * (1 + math.log(1 + count))
         return score
 
-    def _calculate_category_score(self, relevant_categories: List[str], article_categories: str) -> float:
+    def _calculate_category_score(
+        self, relevant_categories: List[str], article_categories: str
+    ) -> float:
         """Calculate score based on pre-filtered category list."""
         score = 0.0
         for category in relevant_categories:
@@ -140,7 +180,9 @@ class ContextBuilder:
                 score += 5
         return score
 
-    def _calculate_coin_score(self, coin: str, content, coin_patterns: Optional[Dict[str, Any]] = None) -> float:
+    def _calculate_coin_score(
+        self, coin: str, content, coin_patterns: Optional[Dict[str, Any]] = None
+    ) -> float:
         """Calculate score based on coin-specific matches using word boundaries."""
         coin_lower = coin.lower()
         score = 0.0
@@ -150,13 +192,13 @@ class ContextBuilder:
             score += 15
 
         if coin_patterns:
-            if coin_patterns['coin_pattern'].search(content.title):
+            if coin_patterns["coin_pattern"].search(content.title):
                 score += 15
-            if coin_patterns['coin_pattern'].search(content.body):
+            if coin_patterns["coin_pattern"].search(content.body):
                 score += 5
         else:
             # Title/body word-boundary regex matches
-            coin_pattern = rf'\b{re.escape(coin_lower)}\b'
+            coin_pattern = rf"\b{re.escape(coin_lower)}\b"
             if re.search(coin_pattern, content.title):
                 score += 15
             if re.search(coin_pattern, content.body):
@@ -168,19 +210,24 @@ class ContextBuilder:
 
         # Special title patterns with word boundaries
         if coin_patterns:
-            if coin_patterns['title_start_pattern'].search(content.title) or \
-               coin_patterns['price_pattern'].search(content.title):
+            if coin_patterns["title_start_pattern"].search(
+                content.title
+            ) or coin_patterns["price_pattern"].search(content.title):
                 score += 20
         else:
-            title_start_pattern = rf'^\s*{re.escape(coin_lower)}\b'
-            price_pattern = rf'\b{re.escape(coin_lower)}\s+price\b'
+            title_start_pattern = rf"^\s*{re.escape(coin_lower)}\b"
+            price_pattern = rf"\b{re.escape(coin_lower)}\s+price\b"
 
-            if re.search(title_start_pattern, content.title) or re.search(price_pattern, content.title):
+            if re.search(title_start_pattern, content.title) or re.search(
+                price_pattern, content.title
+            ):
                 score += 20
 
         return score
 
-    def _calculate_importance_score(self, categories: str, important_categories: Set[str]) -> float:
+    def _calculate_importance_score(
+        self, categories: str, important_categories: Set[str]
+    ) -> float:
         """Calculate score based on important categories."""
         score = 0.0
         for category in important_categories:
@@ -192,7 +239,7 @@ class ContextBuilder:
         """Calculate score multiplier based on article body length (content quality)."""
         if not self.config:
             return 1.0
-        body_len = len(article.get('body', ''))
+        body_len = len(article.get("body", ""))
         if body_len < self.config.RAG_DENSITY_PENALTY_THRESHOLD:
             return self.config.RAG_DENSITY_PENALTY_MULTIPLIER
         if body_len > self.config.RAG_DENSITY_BOOST_THRESHOLD:
@@ -253,9 +300,9 @@ class ContextBuilder:
                 current_tokens += token_count
 
                 # Track article URL if available
-                if 'url' in item:
-                    title = item.get('title', 'Untitled')
-                    self.latest_article_urls[title] = item['url']
+                if "url" in item:
+                    title = item.get("title", "Untitled")
+                    self.latest_article_urls[title] = item["url"]
 
         return "\n\n".join(context_parts)
 
@@ -270,30 +317,39 @@ class ContextBuilder:
         Returns:
             Formatted string: "Title\nSource (Date)\nLead Paragraph..."
         """
-        title = item.get('title', 'No Title').strip()
-        source = item.get('source', 'Unknown Source')
-        published_on = item.get('published_on', 0)
-        published = datetime.fromtimestamp(published_on).strftime('%Y-%m-%d %H:%M UTC')
+        title = item.get("title", "No Title").strip()
+        source = item.get("source", "Unknown Source")
+        published_on = item.get("published_on", 0)
+        published = datetime.fromtimestamp(published_on).strftime("%Y-%m-%d %H:%M UTC")
 
         # Clean up body: normalize whitespace but keep structure for a moment
-        body = item.get('body', '')
+        body = item.get("body", "")
         if not body:
             return ""
 
         # Extract Lead Paragraph (content before first double newline)
-        paragraphs = [p.strip() for p in body.split('\n\n') if p.strip()]
+        paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()]
 
         if not paragraphs:
             return ""
 
         # Start with just the first paragraph (Lead)
-        lead_paragraph = paragraphs[0].replace('\n', ' ')
+        lead_paragraph = paragraphs[0].replace("\n", " ")
 
         # Format header
         header = f"📰 {title}\nSrc: {source} ({published})"
 
+        # Add sentiment if available
+        sentiment_info = ""
+        if "overall_sentiment" in item:
+            sentiment = item["overall_sentiment"]
+            sentiment_emoji = {"positive": "🟢", "negative": "🔴", "neutral": "🟡"}.get(
+                sentiment, "🟡"
+            )
+            sentiment_info = f"\nSentiment: {sentiment_emoji} {sentiment.capitalize()}"
+
         # Combine
-        full_text = f"{header}\n{lead_paragraph}"
+        full_text = f"{header}{sentiment_info}\n{lead_paragraph}"
 
         # Check token count and truncate if necessary
         current_count = self.token_counter.count_tokens(full_text)
@@ -307,9 +363,9 @@ class ContextBuilder:
         truncated = lead_paragraph[:max_chars]
 
         # Backtrack to last period
-        last_period = truncated.rfind('.')
+        last_period = truncated.rfind(".")
         if last_period > len(truncated) * 0.5:
-             truncated = truncated[:last_period+1]
+            truncated = truncated[: last_period + 1]
 
         return f"{header}\n{truncated}..."
 
@@ -320,7 +376,7 @@ class ContextBuilder:
         max_tokens: int,
         k: int,
         _keywords: set,
-        scores_dict: Dict[int, float]
+        scores_dict: Dict[int, float],
     ) -> Tuple[str, int]:
         """
         Bridge method for rag_engine compatibility.
@@ -339,13 +395,15 @@ class ContextBuilder:
         """
         # Take top k articles by score
         sorted_indices = sorted(
-            relevant_indices[:k*2],
+            relevant_indices[: k * 2],
             key=lambda idx: scores_dict.get(idx, 0),
-            reverse=True
+            reverse=True,
         )[:k]
 
         # Convert indices to article dicts
-        articles = [news_database[idx] for idx in sorted_indices if idx < len(news_database)]
+        articles = [
+            news_database[idx] for idx in sorted_indices if idx < len(news_database)
+        ]
 
         # Build context using simple method
         context_text = self.build_context(articles, max_tokens)

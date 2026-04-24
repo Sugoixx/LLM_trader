@@ -108,7 +108,11 @@ class PersistenceManager:
         await asyncio.to_thread(self.save_position, position)
 
     def load_position(self) -> Optional["Position"]:
-        """Load current position from disk."""
+        """Load current position from disk.
+
+        Returns the "ai" slot for backwards compatibility.
+        Handles both legacy flat format and new multi-slot format.
+        """
         if self._position_cache_valid:
             return self._position_cache
 
@@ -120,38 +124,47 @@ class PersistenceManager:
         try:
             with open(self.positions_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                cf_list = data.get("confluence_factors", [])
-                cf_tuple = tuple((name, score) for name, score in cf_list)
-                position = Position(
-                    entry_price=data["entry_price"],
-                    stop_loss=data["stop_loss"],
-                    take_profit=data["take_profit"],
-                    size=data["size"],
-                    entry_time=self._ensure_utc(datetime.fromisoformat(data["entry_time"])),
-                    confidence=data.get("confidence", "MEDIUM"),
-                    direction=data.get("direction", "LONG"),
-                    symbol=data.get("symbol", "BTC/USDC"),
-                    confluence_factors=cf_tuple,
-                    entry_fee=data.get("entry_fee", 0.0),
-                    quote_amount=data.get("quote_amount", 0.0),
-                    size_pct=data.get("size_pct", 0.0),
-                    atr_at_entry=data.get("atr_at_entry", 0.0),
-                    volatility_level=data.get("volatility_level", "MEDIUM"),
-                    sl_distance_pct=data.get("sl_distance_pct", 0.0),
-                    tp_distance_pct=data.get("tp_distance_pct", 0.0),
-                    rr_ratio_at_entry=data.get("rr_ratio_at_entry", 0.0),
-                    adx_at_entry=data.get("adx_at_entry", 0.0),
-                    rsi_at_entry=data.get("rsi_at_entry", 50.0),
-                    max_drawdown_pct=data.get("max_drawdown_pct", 0.0),
-                    max_profit_pct=data.get("max_profit_pct", 0.0),
-                    source=data.get("source", "ai"),
-                )
 
-                # Update cache
-                self._position_cache = position
-                self._position_cache_valid = True
+            # New multi-slot format: {"ai": {...}, "fast": {...}}
+            if isinstance(data, dict) and "entry_price" not in data:
+                data = data.get("ai") or next(iter(data.values()), None)
+                if data is None:
+                    self._position_cache = None
+                    self._position_cache_valid = True
+                    return None
 
-                return position
+            cf_list = data.get("confluence_factors", [])
+            cf_tuple = tuple((name, score) for name, score in cf_list)
+            position = Position(
+                entry_price=data["entry_price"],
+                stop_loss=data["stop_loss"],
+                take_profit=data["take_profit"],
+                size=data["size"],
+                entry_time=self._ensure_utc(datetime.fromisoformat(data["entry_time"])),
+                confidence=data.get("confidence", "MEDIUM"),
+                direction=data.get("direction", "LONG"),
+                symbol=data.get("symbol", "BTC/USDC"),
+                confluence_factors=cf_tuple,
+                entry_fee=data.get("entry_fee", 0.0),
+                quote_amount=data.get("quote_amount", 0.0),
+                size_pct=data.get("size_pct", 0.0),
+                atr_at_entry=data.get("atr_at_entry", 0.0),
+                volatility_level=data.get("volatility_level", "MEDIUM"),
+                sl_distance_pct=data.get("sl_distance_pct", 0.0),
+                tp_distance_pct=data.get("tp_distance_pct", 0.0),
+                rr_ratio_at_entry=data.get("rr_ratio_at_entry", 0.0),
+                adx_at_entry=data.get("adx_at_entry", 0.0),
+                rsi_at_entry=data.get("rsi_at_entry", 50.0),
+                max_drawdown_pct=data.get("max_drawdown_pct", 0.0),
+                max_profit_pct=data.get("max_profit_pct", 0.0),
+                source=data.get("source", "ai"),
+            )
+
+            # Update cache
+            self._position_cache = position
+            self._position_cache_valid = True
+
+            return position
         except Exception as e:
             self.logger.error("Error loading position: %s", e)
             return None

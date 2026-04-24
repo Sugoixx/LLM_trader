@@ -26,7 +26,8 @@ wheels/
 env/
 venv/
 ENV/
-
+SECURITY_AUDIT.md
+SECURITY_IMMEDIATE_ACTIONS.md
 # IDE
 .idea/
 .vscode/

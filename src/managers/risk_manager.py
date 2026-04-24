@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from src.config.protocol import ConfigProtocol
     from src.trading.data_models import RiskAssessment, BrokerConstraints
 
+
 class RiskManager(RiskManagerProtocol):
     """
     Manages risk calculations including position sizing, stop-loss/take-profit dynamic adjustment,
@@ -38,8 +39,24 @@ class RiskManager(RiskManagerProtocol):
         Calculate all risk parameters for a new position entry.
         """
         from src.trading.data_models import RiskAssessment
+
         market_conditions = market_conditions or {}
         direction = "LONG" if signal == "BUY" else "SHORT"
+
+        # 0. Per-symbol min SL override from config (e.g. CRUDOIL=0.020)
+        symbol = market_conditions.get("symbol", "")
+        min_sl_override = 0.0
+        raw_map = self.config.get_config("safety", "min_sl_per_symbol", "")
+        if raw_map and symbol:
+            for entry in raw_map.split(","):
+                entry = entry.strip()
+                if "=" in entry:
+                    sym, val = entry.split("=", 1)
+                    if sym.strip().upper() == symbol.upper():
+                        try:
+                            min_sl_override = float(val.strip())
+                        except ValueError:
+                            pass
 
         # 1. Extract or Default ATR/Volatility
         atr = market_conditions.get("atr", current_price * 0.02)
@@ -80,47 +97,104 @@ class RiskManager(RiskManagerProtocol):
             final_tp = dynamic_tp
             self.logger.info("Using dynamic TP (4x ATR): $%s", f"{final_tp:,.2f}")
 
+        # Trailing stop calculation (1.5x ATR, tighter than initial SL)
+        if direction == "LONG":
+            trailing_distance = atr * 1.5
+        elif direction == "SHORT":
+            trailing_distance = atr * 1.5
+        else:
+            trailing_distance = atr * 1.5
+
         # 4. Circuit Breakers (Clamp Extreme Values)
         sl_distance_raw = abs(current_price - final_sl) / current_price
 
-        # Clamp SL: min 0.5%, max 10%
+        # Clamp SL: min (per-symbol override or 0.5%), max 10%
+        min_sl_pct = min_sl_override if min_sl_override > 0 else 0.005
         if sl_distance_raw > 0.10:
-            self.logger.warning("SL distance %s exceeds 10%% max, clamping", f"{sl_distance_raw:.1%}")
+            self.logger.warning(
+                "SL distance %s exceeds 10%% max, clamping", f"{sl_distance_raw:.1%}"
+            )
             if direction == "LONG":
                 final_sl = current_price * 0.90
             else:
                 final_sl = current_price * 1.10
-        elif sl_distance_raw < 0.005:
-            self.logger.warning("SL distance %s below 0.5%% min, expanding", f"{sl_distance_raw:.1%}")
+        elif sl_distance_raw < min_sl_pct:
+            self.logger.warning(
+                "SL distance %s below %.1f%% min (symbol override=%s), expanding",
+                f"{sl_distance_raw:.1%}",
+                min_sl_pct * 100,
+                min_sl_override,
+            )
             if direction == "LONG":
-                final_sl = current_price * 0.995
+                final_sl = current_price * (1 - min_sl_pct)
             else:
-                final_sl = current_price * 1.005
+                final_sl = current_price * (1 + min_sl_pct)
 
         # Validate Logical Consistency
         if direction == "LONG":
             if final_sl >= current_price:
-                self.logger.warning("Invalid SL for LONG (%s >= %s), using dynamic", final_sl, current_price)
+                self.logger.warning(
+                    "Invalid SL for LONG (%s >= %s), using dynamic",
+                    final_sl,
+                    current_price,
+                )
                 final_sl = dynamic_sl
             if final_tp <= current_price:
-                self.logger.warning("Invalid TP for LONG (%s <= %s), using dynamic", final_tp, current_price)
+                self.logger.warning(
+                    "Invalid TP for LONG (%s <= %s), using dynamic",
+                    final_tp,
+                    current_price,
+                )
                 final_tp = dynamic_tp
         else:  # SHORT
             if final_sl <= current_price:
-                self.logger.warning("Invalid SL for SHORT (%s <= %s), using dynamic", final_sl, current_price)
+                self.logger.warning(
+                    "Invalid SL for SHORT (%s <= %s), using dynamic",
+                    final_sl,
+                    current_price,
+                )
                 final_sl = dynamic_sl
             if final_tp >= current_price:
-                self.logger.warning("Invalid TP for SHORT (%s >= %s), using dynamic", final_tp, current_price)
+                self.logger.warning(
+                    "Invalid TP for SHORT (%s >= %s), using dynamic",
+                    final_tp,
+                    current_price,
+                )
                 final_tp = dynamic_tp
 
         # 5. Position Sizing
         if position_size and position_size > 0:
             final_size_pct = position_size
         else:
-            # Dynamic sizing based on confidence
+            # Volatility-adjusted position sizing
             confidence_map = {"HIGH": 0.03, "MEDIUM": 0.02, "LOW": 0.01}
-            final_size_pct = confidence_map.get(confidence.upper(), 0.02)
-            self.logger.info("Using confidence-based size: %.1f%%", final_size_pct * 100)
+            base_size = confidence_map.get(confidence.upper(), 0.02)
+
+            # Adjust based on volatility (ATR%)
+            if atr_pct > 4:  # Very volatile (oil, altcoins)
+                vol_factor = 0.6
+            elif atr_pct > 2:
+                vol_factor = 0.8
+            else:
+                vol_factor = 1.0
+
+            # Adjust based on asset
+            symbol = market_conditions.get("symbol", "").upper()
+            if "OIL" in symbol or "CRUDE" in symbol:
+                asset_factor = 0.7  # More prudent on oil
+            elif "BTC" in symbol:
+                asset_factor = 1.0
+            else:  # Other riskier cryptos
+                asset_factor = 0.8
+
+            final_size_pct = base_size * vol_factor * asset_factor
+            self.logger.info(
+                "Using volatility-adjusted size: %.1f%% (base=%.1f%%, vol=%.1f, asset=%.1f)",
+                final_size_pct * 100,
+                base_size * 100,
+                vol_factor,
+                asset_factor,
+            )
 
         # 6. Calculate Financials
         allocation = capital * final_size_pct
@@ -165,7 +239,10 @@ class RiskManager(RiskManagerProtocol):
             # Broker minimum lot constraint
             min_lot_notional = max(vol_min, 0.0) * contract * current_price
             min_lot_hit = vol_min > 0 and snapped_lots < vol_min
-            min_notional_hit = min_notional > 0 and snapped_lots * contract * current_price < min_notional
+            min_notional_hit = (
+                min_notional > 0
+                and snapped_lots * contract * current_price < min_notional
+            )
 
             if min_lot_hit or min_notional_hit:
                 # The broker won't accept a trade this small. Compute what
@@ -216,12 +293,13 @@ class RiskManager(RiskManagerProtocol):
                         f"({required_lot:.4f} lots = ${required_notional:,.2f} "
                         f"notional, margin ${required_margin:,.2f} = "
                         f"{(required_margin / capital * 100):.2f}% of capital, "
-                        f"within {max_margin_pct*100:.0f}% cap)."
+                        f"within {max_margin_pct * 100:.0f}% cap)."
                     )
                     self.logger.info(
                         "Risk manager promoted sizing to broker minimum for small "
                         "account: %.4f lots, margin $%.2f (%.2f%% of capital, cap %.0f%%).",
-                        required_lot, required_margin,
+                        required_lot,
+                        required_margin,
                         required_margin / capital * 100 if capital > 0 else 0.0,
                         max_margin_pct * 100,
                     )
@@ -230,7 +308,9 @@ class RiskManager(RiskManagerProtocol):
                     # at the current size_pct. E.g. if size_pct=2% and margin
                     # needed=50$, required capital = 2500$.
                     cap_needed_target = (
-                        required_margin / final_size_pct if final_size_pct > 0 else required_margin
+                        required_margin / final_size_pct
+                        if final_size_pct > 0
+                        else required_margin
                     )
                     cap_top_up = max(0.0, cap_needed_target - capital)
 
@@ -254,7 +334,7 @@ class RiskManager(RiskManagerProtocol):
                         margin_cap_note = (
                             f" Auto-snap disabled: required margin "
                             f"${required_margin:,.2f} > "
-                            f"{max_margin_pct*100:.0f}% of capital "
+                            f"{max_margin_pct * 100:.0f}% of capital "
                             f"(${capital * max_margin_pct:,.2f})."
                         )
                     sizing_warning = (

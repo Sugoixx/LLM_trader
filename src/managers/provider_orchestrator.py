@@ -90,17 +90,49 @@ class ProviderOrchestrator:
         metadata = self._providers.get(provider)
         return metadata.default_model if metadata else "unknown-model"
 
+    @staticmethod
+    def _openrouter_model_supports_chart(model_name: str) -> bool:
+        """Return whether an OpenRouter model can accept image input."""
+        normalized = (model_name or "").strip().lower()
+        if not normalized:
+            return False
+        # Current OpenRouter default profiles use gpt-oss for text-only analysis.
+        return "gpt-oss" not in normalized
+
     def is_available(self, provider: str) -> bool:
         """Check if a provider is available."""
         metadata = self._providers.get(provider)
         return metadata.is_available() if metadata else False
 
-    def supports_chart(self, provider: str) -> bool:
-        """Check if provider supports chart analysis."""
+    def _openrouter_best_chart_model(self, model_override: Optional[str] = None) -> Optional[str]:
+        """Return the best available OpenRouter model for chart requests, or None."""
+        # Explicit override takes priority
+        if model_override and self._openrouter_model_supports_chart(model_override):
+            return model_override
+        # Base model
+        base = self.resolve_model("openrouter")
+        if self._openrouter_model_supports_chart(base):
+            return base
+        # Fallback model
+        fallback = self.config.OPENROUTER_FALLBACK_MODEL
+        if fallback and self._openrouter_model_supports_chart(fallback):
+            return fallback
+        return None
+
+    def supports_chart(self, provider: str, model_override: Optional[str] = None) -> bool:
+        """Check if provider and resolved model support chart analysis."""
         if provider == "all":
-            return self.is_available("googleai") or self.is_available("openrouter") or self.is_available("blockrun")
+            return (
+                self.supports_chart("googleai")
+                or self.supports_chart("openrouter", model_override)
+                or self.supports_chart("blockrun")
+            )
         metadata = self._providers.get(provider)
-        return metadata.supports_chart if metadata and metadata.is_available() else False
+        if not metadata or not metadata.is_available() or not metadata.supports_chart:
+            return False
+        if provider == "openrouter":
+            return self._openrouter_best_chart_model(model_override) is not None
+        return True
 
     async def invoke(
         self,
@@ -206,14 +238,30 @@ class ProviderOrchestrator:
             InvocationResult with response
         """
         if effective_provider == "all":
-            result = await self.invoke_with_fallback(
-                ["googleai", "local", "openrouter", "blockrun"], messages, model=model
+            order = self.config.ALL_PROVIDER_ORDER
+            self.logger.info(
+                "[all] Provider probe order: %s", " → ".join(order)
             )
+            result = await self.invoke_with_fallback(order, messages, model=model)
             return result
         if self.is_available(effective_provider):
             effective_model = self.resolve_model(effective_provider, model)
             self.logger.info("Using %s model: %s", self._providers[effective_provider].name, effective_model)
-            return await self.invoke(effective_provider, messages, model=model)
+            result = await self.invoke(effective_provider, messages, model=model)
+            if result.success:
+                return result
+            # Hot fallback: if the primary provider had a transient error, try others
+            if self._is_transient_failure(result):
+                fallback_order = self._hot_fallback_order(effective_provider)
+                if fallback_order:
+                    self.logger.warning(
+                        "%s transient failure (%s) — hot-switching to: %s",
+                        effective_provider,
+                        result.response.error if result.response else "unknown",
+                        " → ".join(fallback_order),
+                    )
+                    return await self.invoke_with_fallback(fallback_order, messages, model=model)
+            return result
         self._log_unavailable_guidance(effective_provider)
         return InvocationResult(
             success=False,
@@ -242,8 +290,16 @@ class ProviderOrchestrator:
             InvocationResult with response
         """
         if effective_provider == "all":
+            # Local has no vision, and OpenRouter depends on the resolved model.
+            order = [
+                p for p in self.config.ALL_PROVIDER_ORDER
+                if p != "local" and self.supports_chart(p, model)
+            ]
+            self.logger.info(
+                "[all/chart] Provider probe order (vision-capable): %s", " → ".join(order)
+            )
             return await self.invoke_with_fallback(
-                ["googleai", "openrouter", "blockrun"], messages, chart=True, chart_image=chart_image, model=model
+                order, messages, chart=True, chart_image=chart_image, model=model
             )
         if effective_provider == "local":
             return InvocationResult(
@@ -252,10 +308,39 @@ class ProviderOrchestrator:
                 provider="local",
                 model=self.resolve_model("local", model)
             )
-        if self.is_available(effective_provider):
-            effective_model = self.resolve_model(effective_provider, model)
-            self.logger.info("Using %s for chart analysis: %s", self._providers[effective_provider].name, effective_model)
-            return await self.invoke(effective_provider, messages, chart=True, chart_image=chart_image, model=model)
+        if self.is_available(effective_provider) and self.supports_chart(effective_provider, model):
+            if effective_provider == "openrouter":
+                effective_model = self._openrouter_best_chart_model(model)
+                if effective_model != self.resolve_model(effective_provider, model):
+                    self.logger.info(
+                        "OpenRouter base model does not support charts — using fallback model for chart analysis: %s",
+                        effective_model,
+                    )
+                else:
+                    self.logger.info("Using OpenRouter for chart analysis: %s", effective_model)
+            else:
+                effective_model = self.resolve_model(effective_provider, model)
+                self.logger.info("Using %s for chart analysis: %s", self._providers[effective_provider].name, effective_model)
+            result = await self.invoke(effective_provider, messages, chart=True, chart_image=chart_image, model=effective_model)
+            if result.success:
+                return result
+            # Hot fallback for chart: try other vision-capable providers on transient errors
+            if self._is_transient_failure(result):
+                fallback_order = [
+                    p for p in self._hot_fallback_order(effective_provider)
+                    if self.supports_chart(p, model)
+                ]
+                if fallback_order:
+                    self.logger.warning(
+                        "%s chart transient failure (%s) — hot-switching to: %s",
+                        effective_provider,
+                        result.response.error if result.response else "unknown",
+                        " → ".join(fallback_order),
+                    )
+                    return await self.invoke_with_fallback(
+                        fallback_order, messages, chart=True, chart_image=chart_image, model=model
+                    )
+            return result
         self._log_unavailable_guidance(effective_provider)
         return InvocationResult(
             success=False,
@@ -406,6 +491,29 @@ class ProviderOrchestrator:
     def _is_rate_limited(self, response: Optional[ChatResponseModel]) -> bool:
         """Check if response indicates rate limiting."""
         return bool(response and response.error and "rate_limit" in response.error)
+
+    def _is_transient_failure(self, result: InvocationResult) -> bool:
+        """Return True when a provider failed with a retriable/transient error.
+
+        Transient errors (rate_limit, overload, timeout, connection) justify
+        trying another provider at runtime instead of giving up immediately.
+        """
+        if result.success:
+            return False
+        error = (result.response.error if result.response else None) or ""
+        TRANSIENT_PREFIXES = ("rate_limit", "overloaded", "timeout", "connection")
+        return any(error.startswith(p) for p in TRANSIENT_PREFIXES)
+
+    def _hot_fallback_order(self, failed_provider: str) -> List[str]:
+        """Return available providers to try after *failed_provider* failed.
+
+        Uses ALL_PROVIDER_ORDER as the priority list so the user's preferred
+        order is respected, minus the provider that just failed.
+        """
+        return [
+            p for p in self.config.ALL_PROVIDER_ORDER
+            if p != failed_provider and self.is_available(p)
+        ]
 
     def _log_attempt(self, provider: str, model: str, chart: bool) -> None:
         """Log provider attempt."""

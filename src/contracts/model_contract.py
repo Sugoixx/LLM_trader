@@ -55,7 +55,11 @@ class ModelManagerProtocol(Protocol):
         """
         ...
 
-    def supports_image_analysis(self, provider_override: Optional[str] = None) -> bool:
+    def supports_image_analysis(
+        self,
+        provider_override: Optional[str] = None,
+        model_override: Optional[str] = None,
+    ) -> bool:
         """
         Check if the selected provider supports image analysis.
         """

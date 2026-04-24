@@ -250,7 +250,7 @@ class AnalysisEngine:
 
             async def run_tech_and_chart():
                 await self._perform_technical_analysis()
-                has_chart_analysis = self.model_manager.supports_image_analysis(provider)
+                has_chart_analysis = self.model_manager.supports_image_analysis(provider, model)
                 if has_chart_analysis:
                     return await self._generate_chart_image(), has_chart_analysis
                 return None, False
@@ -515,7 +515,7 @@ class AnalysisEngine:
             chart_image, has_chart_analysis = precomputed_chart
         else:
             # Fallback for synchronous calls or if parallel logic bypassed
-            has_chart_analysis = self.model_manager.supports_image_analysis(provider)
+            has_chart_analysis = self.model_manager.supports_image_analysis(provider, model)
             chart_image: Optional[io.BytesIO] = None
 
             if has_chart_analysis:

@@ -2,6 +2,7 @@
 Crypto Trading Bot - Entry Point
 Automated trading with AI-powered decisions.
 """
+
 # --- Standard Library ---
 import asyncio
 import atexit
@@ -35,15 +36,23 @@ from src.platforms.mt5_manager import MT5ExchangeManager
 from src.platforms.commodities_news import CommoditiesNewsClient
 from src.analyzer.analysis_engine import AnalysisEngine
 from src.rag import RagEngine
+from src.rag.sentiment_analyzer import SentimentAnalyzer
 from src.utils.token_counter import TokenCounter, CostStorage, ModelPricing
 from src.utils.format_utils import FormatUtils
-from src.managers.model_manager import ModelManager, ProviderClients, ProviderOrchestrator
+from src.managers.model_manager import (
+    ModelManager,
+    ProviderClients,
+    ProviderOrchestrator,
+)
 from src.factories import ProviderFactory
 from src.managers.persistence_manager import PersistenceManager
 from src.managers.risk_manager import RiskManager
 from src.trading import (
-    TradingStrategy, TradingBrainService,
-    TradingStatisticsService, TradingMemoryService, PositionExtractor,
+    TradingStrategy,
+    TradingBrainService,
+    TradingStatisticsService,
+    TradingMemoryService,
+    PositionExtractor,
     DebateService,
 )
 from src.trading.vector_memory import VectorMemoryService
@@ -60,27 +69,38 @@ from src.analyzer.formatters import (
     MarketOverviewFormatter,
     LongTermFormatter,
     MarketFormatter,
-    MarketPeriodFormatter
+    MarketPeriodFormatter,
 )
 from src.rag import (
-    RagFileHandler, NewsManager, MarketDataManager,
-    IndexManager, ContextBuilder, CategoryFetcher,
-    CategoryProcessor, TickerManager, NewsCategoryAnalyzer
+    RagFileHandler,
+    NewsManager,
+    MarketDataManager,
+    IndexManager,
+    ContextBuilder,
+    CategoryFetcher,
+    CategoryProcessor,
+    TickerManager,
+    NewsCategoryAnalyzer,
 )
 from src.rag.market_components import (
     MarketDataFetcher,
     MarketDataProcessor,
     MarketDataCache,
-    MarketOverviewBuilder
+    MarketOverviewBuilder,
 )
 from src.analyzer import (
-    TechnicalCalculator, PatternAnalyzer, MarketDataCollector,
-    MarketMetricsCalculator, AnalysisResultProcessor,
-    TechnicalFormatter
+    TechnicalCalculator,
+    PatternAnalyzer,
+    MarketDataCollector,
+    MarketMetricsCalculator,
+    AnalysisResultProcessor,
+    TechnicalFormatter,
 )
 from src.analyzer.prompts import PromptBuilder
 from src.analyzer.prompts.template_manager import TemplateManager
-from src.analyzer.prompts.context_builder import ContextBuilder as AnalyzerContextBuilder
+from src.analyzer.prompts.context_builder import (
+    ContextBuilder as AnalyzerContextBuilder,
+)
 from src.analyzer.pattern_engine import ChartGenerator
 from src.utils.timeframe_validator import TimeframeValidator
 from src.trading.algo_strategies import StrategySignalLayer
@@ -102,12 +122,15 @@ def _get_best_device() -> str:
         return "mps"
     return "cpu"
 
+
 try:
     from PyQt6.QtWidgets import QApplication, QMessageBox
     from PyQt6.QtCore import Qt
+
     PYQT_AVAILABLE = True
 except ImportError:
     PYQT_AVAILABLE = False
+
 
 class SingleInstanceLock:
     """Manages a single instance lock file to prevent multiple application instances."""
@@ -115,19 +138,24 @@ class SingleInstanceLock:
     def __init__(self, app_name: str = ".llm_trader.lock"):
         self.lock_file_path = Path.home() / app_name
         self._lock_handle: Optional[int] = None
+
     def acquire(self) -> bool:
         """Attempt to acquire the lock. Returns True if successful."""
         try:
-            self._lock_handle = os.open(str(self.lock_file_path), os.O_CREAT | os.O_RDWR)
+            self._lock_handle = os.open(
+                str(self.lock_file_path), os.O_CREAT | os.O_RDWR
+            )
 
             if sys.platform == "win32":
                 import msvcrt
+
                 try:
                     msvcrt.locking(self._lock_handle, msvcrt.LK_NBLCK, 1)
                 except OSError:
                     return False
             else:
                 import fcntl  # pylint: disable=import-error
+
                 try:
                     fcntl.flock(self._lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
@@ -146,9 +174,11 @@ class SingleInstanceLock:
             try:
                 if sys.platform == "win32":
                     import msvcrt
+
                     msvcrt.locking(self._lock_handle, msvcrt.LK_UNLCK, 1)
                 else:
                     import fcntl  # pylint: disable=import-error
+
                     fcntl.flock(self._lock_handle, fcntl.LOCK_UN)
                 os.close(self._lock_handle)
             except Exception:
@@ -192,54 +222,58 @@ class CompositionRoot:
 
         end_time = time.perf_counter()
         init_duration = end_time - start_time
-        self.logger.info("All dependencies initialized successfully in %.2f seconds", init_duration)
+        self.logger.info(
+            "All dependencies initialized successfully in %.2f seconds", init_duration
+        )
 
         # Combine everything for the bot and dashboard
         deps = {
-            'exchange_manager': infra['exchange_manager'],
-            'market_analyzer': analyzer['engine'],
-            'trading_strategy': trading['strategy'],
-            'discord_notifier': notifiers['notifier'],
-            'discord_task': notifiers['task'],
-            'keyboard_handler': infra['keyboard_handler'],
-            'rag_engine': rag,
-            'coingecko_api': apis['coingecko'],
-            'news_client': apis['news'],
-            'market_api': apis['market'],
-            'categories_api': apis['categories'],
-            'alternative_me_api': apis['alternative_me'],
-            'cryptocompare_session': infra['session'],
-            'persistence': trading['persistence'],
-            'model_manager': models['manager'],
-            'brain_service': trading['brain_service'],
-            'statistics_service': trading['statistics_service'],
-            'memory_service': trading['memory_service'],
-            'order_executor': trading.get('order_executor'),
+            "exchange_manager": infra["exchange_manager"],
+            "market_analyzer": analyzer["engine"],
+            "trading_strategy": trading["strategy"],
+            "discord_notifier": notifiers["notifier"],
+            "discord_task": notifiers["task"],
+            "keyboard_handler": infra["keyboard_handler"],
+            "rag_engine": rag,
+            "coingecko_api": apis["coingecko"],
+            "news_client": apis["news"],
+            "market_api": apis["market"],
+            "categories_api": apis["categories"],
+            "alternative_me_api": apis["alternative_me"],
+            "cryptocompare_session": infra["session"],
+            "persistence": trading["persistence"],
+            "model_manager": models["manager"],
+            "brain_service": trading["brain_service"],
+            "statistics_service": trading["statistics_service"],
+            "memory_service": trading["memory_service"],
+            "order_executor": trading.get("order_executor"),
         }
 
         # Always instantiate DashboardServer so the 'd' keyboard toggle can start/stop it at runtime.
         # The server socket is NOT opened until start() is called, so this is safe even when disabled.
         dashboard_server = DashboardServer(
-            brain_service=trading['brain_service'],
-            vector_memory=trading['brain_service'].vector_memory if trading['brain_service'] else None,
-            analysis_engine=analyzer['engine'],
+            brain_service=trading["brain_service"],
+            vector_memory=trading["brain_service"].vector_memory
+            if trading["brain_service"]
+            else None,
+            analysis_engine=analyzer["engine"],
             config=self.config,
             logger=self.logger,
-            unified_parser=utils['parser'],
-            persistence=trading['persistence'],
-            exchange_manager=infra['exchange_manager'],
+            unified_parser=utils["parser"],
+            persistence=trading["persistence"],
+            exchange_manager=infra["exchange_manager"],
             host=self.config.DASHBOARD_HOST,
-            port=self.config.DASHBOARD_PORT
+            port=self.config.DASHBOARD_PORT,
         )
 
-        deps['dashboard_server'] = dashboard_server
-        deps['dashboard_state'] = dashboard_server.dashboard_state
+        deps["dashboard_server"] = dashboard_server
+        deps["dashboard_state"] = dashboard_server.dashboard_state
 
         # Inject dashboard_state into trading strategy for auto-trade toggle
-        trading['strategy'].dashboard_state = dashboard_server.dashboard_state
+        trading["strategy"].dashboard_state = dashboard_server.dashboard_state
 
         # Inject trading_strategy into dashboard for manual BUY/SELL/STOP buttons
-        dashboard_server.set_trading_strategy(trading['strategy'])
+        dashboard_server.set_trading_strategy(trading["strategy"])
 
         return deps
 
@@ -253,7 +287,9 @@ class CompositionRoot:
 
         # Calculate symbol-specific brain dir
         safe_symbol = self.config.CRYPTO_PAIR.replace("/", "_").replace("-", "_")
-        brain_dir = os.path.join(data_dir, "trading", f"brain_{safe_symbol}_{self.config.TIMEFRAME}")
+        brain_dir = os.path.join(
+            data_dir, "trading", f"brain_{safe_symbol}_{self.config.TIMEFRAME}"
+        )
         os.makedirs(brain_dir, exist_ok=True)
 
     async def _provision_infrastructure(self) -> dict:
@@ -261,7 +297,9 @@ class CompositionRoot:
         # Select exchange manager based on MT5 config
         if self.config.MT5_ENABLED:
             self.logger.info("MT5 mode enabled — using MetaTrader 5 exchange manager")
-            exchange_manager = MT5ExchangeManager(logger=self.logger, config=self.config)
+            exchange_manager = MT5ExchangeManager(
+                logger=self.logger, config=self.config
+            )
         else:
             exchange_manager = ExchangeManager(logger=self.logger, config=self.config)
         await exchange_manager.initialize()
@@ -270,9 +308,9 @@ class CompositionRoot:
         keyboard_handler = KeyboardHandler(logger=self.logger)
 
         return {
-            'exchange_manager': exchange_manager,
-            'session': session,
-            'keyboard_handler': keyboard_handler
+            "exchange_manager": exchange_manager,
+            "session": session,
+            "keyboard_handler": keyboard_handler,
         }
 
     def _provision_utilities(self) -> dict:
@@ -287,28 +325,31 @@ class CompositionRoot:
         collision_resolver = CategoryCollisionResolver()
 
         return {
-            'format_utils': format_utils,
-            'parser': parser,
-            'token_counter': token_counter,
+            "format_utils": format_utils,
+            "parser": parser,
+            "token_counter": token_counter,
             # 'sentence_splitter': sentence_splitter, # Removed
-            'ti_factory': ti_factory,
-            'timeframe_validator': timeframe_validator,
-            'data_fetcher_factory': data_fetcher_factory,
-            'collision_resolver': collision_resolver
+            "ti_factory": ti_factory,
+            "timeframe_validator": timeframe_validator,
+            "data_fetcher_factory": data_fetcher_factory,
+            "collision_resolver": collision_resolver,
         }
 
     async def _provision_platforms(self, infra: dict, utils: dict) -> dict:
         """Provision external API clients."""
         from aiohttp_client_cache import SQLiteBackend
-        coingecko_backend = SQLiteBackend(cache_name='cache/coingecko_cache.db', expire_after=-1)
+
+        coingecko_backend = SQLiteBackend(
+            cache_name="cache/coingecko_cache.db", expire_after=-1
+        )
 
         coingecko = CoinGeckoAPI(
             logger=self.logger,
             cache_backend=coingecko_backend,
-            cache_dir='data/market_data',
+            cache_dir="data/market_data",
             api_key=self.config.COINGECKO_API_KEY,
             update_interval_hours=24,
-            global_api_url=self.config.RAG_COINGECKO_GLOBAL_API_URL
+            global_api_url=self.config.RAG_COINGECKO_GLOBAL_API_URL,
         )
         await coingecko.initialize()
 
@@ -316,69 +357,107 @@ class CompositionRoot:
 
         cc_data_processor = CryptoCompareDataProcessor(self.logger)
         categories = CryptoCompareCategoriesAPI(
-            logger=self.logger, config=self.config, data_processor=cc_data_processor,
-            collision_resolver=utils['collision_resolver'],
-            data_dir='data', categories_update_interval_hours=self.config.RAG_CATEGORIES_UPDATE_INTERVAL_HOURS
+            logger=self.logger,
+            config=self.config,
+            data_processor=cc_data_processor,
+            collision_resolver=utils["collision_resolver"],
+            data_dir="data",
+            categories_update_interval_hours=self.config.RAG_CATEGORIES_UPDATE_INTERVAL_HOURS,
         )
         await categories.initialize()
 
         defillama = DefiLlamaClient(
-            logger=self.logger, session=infra['session'], cache_dir='cache',
-            update_interval_hours=self.config.RAG_DEFILLAMA_UPDATE_INTERVAL_HOURS
+            logger=self.logger,
+            session=infra["session"],
+            cache_dir="cache",
+            update_interval_hours=self.config.RAG_DEFILLAMA_UPDATE_INTERVAL_HOURS,
         )
 
         alternative_me = AlternativeMeAPI(logger=self.logger)
         await alternative_me.initialize()
 
         return {
-            'coingecko': coingecko,
-            'news': news_client,
-            'market': CryptoCompareMarketAPI(logger=self.logger, config=self.config),
-            'categories': categories,
-            'defillama': defillama,
-            'alternative_me': alternative_me
+            "coingecko": coingecko,
+            "news": news_client,
+            "market": CryptoCompareMarketAPI(logger=self.logger, config=self.config),
+            "categories": categories,
+            "defillama": defillama,
+            "alternative_me": alternative_me,
         }
 
-    async def _provision_rag_layer(self, infra: dict, apis: dict, utils: dict) -> RagEngine:
+    async def _provision_rag_layer(
+        self, infra: dict, apis: dict, utils: dict
+    ) -> RagEngine:
         """Provision the RAG (Retrieval Augmented Generation) engine."""
+        sentiment_analyzer = SentimentAnalyzer(self.logger)
         article_processor = ArticleProcessor(
-            logger=self.logger, unified_parser=utils['parser'],
-            format_utils=utils['format_utils']
+            logger=self.logger,
+            unified_parser=utils["parser"],
+            format_utils=utils["format_utils"],
+            sentiment_analyzer=sentiment_analyzer,
         )
 
-        file_handler = RagFileHandler(logger=self.logger, config=self.config, unified_parser=utils['parser'])
+        file_handler = RagFileHandler(
+            logger=self.logger, config=self.config, unified_parser=utils["parser"]
+        )
         news_manager = NewsManager(
-            logger=self.logger, file_handler=file_handler, news_client=apis['news'],
-            categories_api=apis['categories'], session=infra['session'], article_processor=article_processor
+            logger=self.logger,
+            file_handler=file_handler,
+            news_client=apis["news"],
+            categories_api=apis["categories"],
+            session=infra["session"],
+            article_processor=article_processor,
         )
 
         marker_fetcher = MarketDataFetcher(
-            self.logger, apis['coingecko'], infra['exchange_manager'], apis['market'], apis['defillama']
+            self.logger,
+            apis["coingecko"],
+            infra["exchange_manager"],
+            apis["market"],
+            apis["defillama"],
         )
-        market_processor = MarketDataProcessor(self.logger, utils['parser'])
+        market_processor = MarketDataProcessor(self.logger, utils["parser"])
         data_manager = MarketDataManager(
-            self.logger, file_handler, apis['coingecko'], apis['market'],
-            infra['exchange_manager'], unified_parser=utils['parser'],
-            fetcher=marker_fetcher, processor=market_processor,
+            self.logger,
+            file_handler,
+            apis["coingecko"],
+            apis["market"],
+            infra["exchange_manager"],
+            unified_parser=utils["parser"],
+            fetcher=marker_fetcher,
+            processor=market_processor,
             cache=MarketDataCache(self.logger, file_handler),
-            overview_builder=MarketOverviewBuilder(self.logger, market_processor)
+            overview_builder=MarketOverviewBuilder(self.logger, market_processor),
         )
 
-        category_processor = CategoryProcessor(self.logger, utils['collision_resolver'], file_handler)
+        category_processor = CategoryProcessor(
+            self.logger, utils["collision_resolver"], file_handler
+        )
 
         # Create commodities news client for non-crypto assets (oil, gold, forex, etc.)
         commodities_client = CommoditiesNewsClient(self.logger, self.config)
 
         engine = RagEngine(
-            logger=self.logger, token_counter=utils['token_counter'], config=self.config,
-            coingecko_api=apis['coingecko'], exchange_manager=infra['exchange_manager'],
-            file_handler=file_handler, news_manager=news_manager, market_data_manager=data_manager,
+            logger=self.logger,
+            token_counter=utils["token_counter"],
+            config=self.config,
+            coingecko_api=apis["coingecko"],
+            exchange_manager=infra["exchange_manager"],
+            file_handler=file_handler,
+            news_manager=news_manager,
+            market_data_manager=data_manager,
             index_manager=IndexManager(self.logger, article_processor),
-            category_fetcher=CategoryFetcher(self.logger, apis['categories']),
+            category_fetcher=CategoryFetcher(self.logger, apis["categories"]),
             category_processor=category_processor,
-            ticker_manager=TickerManager(self.logger, file_handler, infra['exchange_manager']),
-            news_category_analyzer=NewsCategoryAnalyzer(self.logger, category_processor, utils['parser']),
-            context_builder=ContextBuilder(self.logger, utils['token_counter'], self.config, article_processor),
+            ticker_manager=TickerManager(
+                self.logger, file_handler, infra["exchange_manager"]
+            ),
+            news_category_analyzer=NewsCategoryAnalyzer(
+                self.logger, category_processor, utils["parser"]
+            ),
+            context_builder=ContextBuilder(
+                self.logger, utils["token_counter"], self.config, article_processor
+            ),
             commodities_news_client=commodities_client,
         )
         await engine.initialize()
@@ -387,69 +466,113 @@ class CompositionRoot:
     def _provision_model_layer(self, utils: dict) -> dict:
         """Provision AI model managers and providers."""
         provider_factory = ProviderFactory(self.logger, self.config)
-        provider_clients = ProviderClients.from_factory_dict(provider_factory.create_all_clients())
+        provider_clients = ProviderClients.from_factory_dict(
+            provider_factory.create_all_clients()
+        )
         orchestrator = ProviderOrchestrator(self.logger, self.config, provider_clients)
 
         manager = ModelManager(
-            logger=self.logger, config=self.config, unified_parser=utils['parser'],
-            token_counter=utils['token_counter'], cost_storage=CostStorage(),
-            model_pricing=ModelPricing(), orchestrator=orchestrator, provider_clients=provider_clients
+            logger=self.logger,
+            config=self.config,
+            unified_parser=utils["parser"],
+            token_counter=utils["token_counter"],
+            cost_storage=CostStorage(),
+            model_pricing=ModelPricing(),
+            orchestrator=orchestrator,
+            provider_clients=provider_clients,
         )
 
-        return {'manager': manager}
+        return {"manager": manager}
 
     async def _provision_analyzer_layer(
         self, infra: dict, apis: dict, utils: dict, rag: RagEngine, models: dict
     ) -> dict:
         """Provision the market analysis engine."""
-        overview_fmt = MarketOverviewFormatter(self.logger, utils['format_utils'])
-        long_term_fmt = LongTermFormatter(self.logger, utils['format_utils'])
-        period_fmt = MarketPeriodFormatter(self.logger, utils['format_utils'])
+        overview_fmt = MarketOverviewFormatter(self.logger, utils["format_utils"])
+        long_term_fmt = LongTermFormatter(self.logger, utils["format_utils"])
+        period_fmt = MarketPeriodFormatter(self.logger, utils["format_utils"])
 
         market_fmt = MarketFormatter(
-            self.logger, utils['format_utils'], self.config, utils['token_counter'],
-            overview_fmt, period_fmt, long_term_fmt
+            self.logger,
+            utils["format_utils"],
+            self.config,
+            utils["token_counter"],
+            overview_fmt,
+            period_fmt,
+            long_term_fmt,
         )
 
-        tech_calc = TechnicalCalculator(self.logger, utils['format_utils'], utils['ti_factory'])
+        tech_calc = TechnicalCalculator(
+            self.logger, utils["format_utils"], utils["ti_factory"]
+        )
         pattern_analyzer = PatternAnalyzer(
             pattern_engine=PatternEngine(lookback=5, lookahead=5),
             indicator_pattern_engine=IndicatorPatternEngine(),
-            logger=self.logger
+            logger=self.logger,
         )
         try:
             pattern_analyzer.warmup()
         except Exception as warmup_error:
-            self.logger.warning("Pattern analyzer warm-up could not run: %s", warmup_error)
+            self.logger.warning(
+                "Pattern analyzer warm-up could not run: %s", warmup_error
+            )
 
         ctx_builder = AnalyzerContextBuilder(
-            self.config.TIMEFRAME, self.logger, utils['format_utils'],
-            market_fmt, period_fmt, long_term_fmt, utils['timeframe_validator']
+            self.config.TIMEFRAME,
+            self.logger,
+            utils["format_utils"],
+            market_fmt,
+            period_fmt,
+            long_term_fmt,
+            utils["timeframe_validator"],
         )
-        
+
         prompt_builder = PromptBuilder(
-            self.config.TIMEFRAME, self.logger, tech_calc, self.config, utils['format_utils'],
-            overview_fmt, long_term_fmt, TechnicalFormatter(tech_calc, self.logger, utils['format_utils']),
-            market_fmt, utils['timeframe_validator'],
-            TemplateManager(self.config, self.logger, utils['timeframe_validator']), ctx_builder
+            self.config.TIMEFRAME,
+            self.logger,
+            tech_calc,
+            self.config,
+            utils["format_utils"],
+            overview_fmt,
+            long_term_fmt,
+            TechnicalFormatter(tech_calc, self.logger, utils["format_utils"]),
+            market_fmt,
+            utils["timeframe_validator"],
+            TemplateManager(self.config, self.logger, utils["timeframe_validator"]),
+            ctx_builder,
         )
-        
+
         engine = AnalysisEngine(
-            self.logger, rag, apis['coingecko'], models['manager'], apis['alternative_me'],
-            apis['market'], self.config, tech_calc, pattern_analyzer, prompt_builder,
-            MarketDataCollector(self.logger, rag, apis['alternative_me'], session=infra['session']),
-            MarketMetricsCalculator(self.logger),
-            AnalysisResultProcessor(models['manager'], self.logger, utils['parser']),
-            ChartGenerator(
-                self.logger, self.config, formatter=utils['format_utils'].fmt, format_utils=utils['format_utils']
+            self.logger,
+            rag,
+            apis["coingecko"],
+            models["manager"],
+            apis["alternative_me"],
+            apis["market"],
+            self.config,
+            tech_calc,
+            pattern_analyzer,
+            prompt_builder,
+            MarketDataCollector(
+                self.logger, rag, apis["alternative_me"], session=infra["session"]
             ),
-            data_fetcher_factory=utils['data_fetcher_factory'],
+            MarketMetricsCalculator(self.logger),
+            AnalysisResultProcessor(models["manager"], self.logger, utils["parser"]),
+            ChartGenerator(
+                self.logger,
+                self.config,
+                formatter=utils["format_utils"].fmt,
+                format_utils=utils["format_utils"],
+            ),
+            data_fetcher_factory=utils["data_fetcher_factory"],
             signal_layer=StrategySignalLayer(self.logger),
         )
-        
-        return {'engine': engine}
 
-    def _provision_trading_layer(self, utils: dict, models: dict = None, infra: dict = None) -> dict:
+        return {"engine": engine}
+
+    def _provision_trading_layer(
+        self, utils: dict, models: dict = None, infra: dict = None
+    ) -> dict:
         """Provision trading strategy and memory services."""
         # Route persistence through the profile's DATA_DIR so each instance
         # (crypto/forex/oil) keeps its own positions.json, trade_history.json,
@@ -460,7 +583,11 @@ class CompositionRoot:
 
         # Calculate specialized brain path
         safe_symbol = self.config.CRYPTO_PAIR.replace("/", "_").replace("-", "_")
-        brain_path = os.path.join(self.config.DATA_DIR, "trading", f"brain_{safe_symbol}_{self.config.TIMEFRAME}")
+        brain_path = os.path.join(
+            self.config.DATA_DIR,
+            "trading",
+            f"brain_{safe_symbol}_{self.config.TIMEFRAME}",
+        )
 
         # Create symbol-specific chroma client
         chroma_client = chromadb.PersistentClient(path=brain_path)
@@ -475,18 +602,24 @@ class CompositionRoot:
             os.environ["HF_TOKEN"] = hf_token
             self.logger.info("HF_TOKEN set for HuggingFace Hub authentication")
         else:
-            self.logger.warning("HF_TOKEN not set — HuggingFace requests will be unauthenticated")
+            self.logger.warning(
+                "HF_TOKEN not set — HuggingFace requests will be unauthenticated"
+            )
 
-        embedding_model = SentenceTransformer("BAAI/bge-small-en-v1.5", device=embed_device)
+        embedding_model = SentenceTransformer(
+            "BAAI/bge-small-en-v1.5", device=embed_device
+        )
 
         # Inject chroma_client into VectorMemoryService
-        vector_memory = VectorMemoryService(self.logger, chroma_client, embedding_model=embedding_model)
-        
-        brain_service = TradingBrainService(
-            self.logger, persistence, vector_memory
+        vector_memory = VectorMemoryService(
+            self.logger, chroma_client, embedding_model=embedding_model
         )
-        
-        memory_service = TradingMemoryService(self.logger, persistence, max_memory=10, vector_memory=vector_memory)
+
+        brain_service = TradingBrainService(self.logger, persistence, vector_memory)
+
+        memory_service = TradingMemoryService(
+            self.logger, persistence, max_memory=10, vector_memory=vector_memory
+        )
         statistics_service = TradingStatisticsService(self.logger, persistence)
 
         # Create DebateService if enabled
@@ -494,31 +627,41 @@ class CompositionRoot:
         if models and self.config.DEBATE_ENABLED:
             debate_service = DebateService(
                 logger=self.logger,
-                model_manager=models['manager'],
+                model_manager=models["manager"],
                 config=self.config,
             )
-            self.logger.info("Debate service enabled (quick_model=%s)", self.config.DEBATE_USE_QUICK_MODEL)
-        
+            self.logger.info(
+                "Debate service enabled (quick_model=%s)",
+                self.config.DEBATE_USE_QUICK_MODEL,
+            )
+
         from src.factories.position_factory import PositionFactory
 
         # Create Order Executor (live or demo)
         order_executor = self._create_order_executor(infra)
 
         strategy = TradingStrategy(
-            self.logger, persistence, brain_service, statistics_service, memory_service,
-            risk_manager, self.config, PositionExtractor(self.logger, utils['parser']),
-            PositionFactory(self.logger), debate_service=debate_service,
+            self.logger,
+            persistence,
+            brain_service,
+            statistics_service,
+            memory_service,
+            risk_manager,
+            self.config,
+            PositionExtractor(self.logger, utils["parser"]),
+            PositionFactory(self.logger),
+            debate_service=debate_service,
             order_executor=order_executor,
         )
-        
+
         return {
-            'strategy': strategy,
-            'persistence': persistence,
-            'brain_service': brain_service,
-            'memory_service': memory_service,
-            'statistics_service': statistics_service,
-            'debate_service': debate_service,
-            'order_executor': order_executor,
+            "strategy": strategy,
+            "persistence": persistence,
+            "brain_service": brain_service,
+            "memory_service": memory_service,
+            "statistics_service": statistics_service,
+            "debate_service": debate_service,
+            "order_executor": order_executor,
         }
 
     def _create_order_executor(self, infra: dict = None):
@@ -532,23 +675,34 @@ class CompositionRoot:
         # The MT5 demo account IS the paper trading layer — no need for LLM_Trader's DemoExecutor
         if self.config.MT5_ENABLED:
             from src.trading.mt5_order_executor import MT5OrderExecutor
-            exchange_manager = infra.get('exchange_manager') if infra else None
-            if not exchange_manager or not hasattr(exchange_manager, 'exchanges'):
+
+            exchange_manager = infra.get("exchange_manager") if infra else None
+            if not exchange_manager or not hasattr(exchange_manager, "exchanges"):
                 self.logger.error(
                     "MT5_ENABLED=true but MT5ExchangeManager not available. "
                     "Falling back to DEMO mode."
                 )
                 return DemoExecutor(self.logger, self.config)
 
-            mt5_exchange = exchange_manager.exchanges.get('mt5')
+            mt5_exchange = exchange_manager.exchanges.get("mt5")
             if not mt5_exchange:
-                self.logger.error("MT5 exchange not found in manager. Falling back to DEMO.")
+                self.logger.error(
+                    "MT5 exchange not found in manager. Falling back to DEMO."
+                )
                 return DemoExecutor(self.logger, self.config)
 
             mode_label = "LIVE" if self.config.LIVE_TRADING_ENABLED else "DEMO"
             self.logger.warning("=" * 60)
-            self.logger.warning("  MT5 TRADING MODE: %s — Orders go to MT5 %s account", mode_label, mode_label.lower())
-            self.logger.warning("  Broker: %s | Max order: $%.0f", self.config.MT5_SERVER, self.config.LIVE_MAX_ORDER_USD)
+            self.logger.warning(
+                "  MT5 TRADING MODE: %s — Orders go to MT5 %s account",
+                mode_label,
+                mode_label.lower(),
+            )
+            self.logger.warning(
+                "  Broker: %s | Max order: $%.0f",
+                self.config.MT5_SERVER,
+                self.config.LIVE_MAX_ORDER_USD,
+            )
             self.logger.warning("=" * 60)
             return MT5OrderExecutor(self.logger, self.config, mt5_exchange)
 
@@ -570,42 +724,76 @@ class CompositionRoot:
         exchange_id = self.config.LIVE_EXCHANGE
         self.logger.warning("=" * 60)
         self.logger.warning("  LIVE TRADING MODE — REAL MONEY AT RISK")
-        self.logger.warning("  Exchange: %s | Max order: $%.0f", exchange_id, self.config.LIVE_MAX_ORDER_USD)
+        self.logger.warning(
+            "  Exchange: %s | Max order: $%.0f",
+            exchange_id,
+            self.config.LIVE_MAX_ORDER_USD,
+        )
         self.logger.warning("=" * 60)
 
         # Create authenticated CCXT exchange instance
         import ccxt.async_support as ccxt_async
+
         try:
             exchange_class = ccxt_async.__dict__[exchange_id]
         except KeyError:
-            self.logger.error("Exchange '%s' not found in CCXT. Falling back to DEMO.", exchange_id)
+            self.logger.error(
+                "Exchange '%s' not found in CCXT. Falling back to DEMO.", exchange_id
+            )
             return DemoExecutor(self.logger, self.config)
 
-        exchange = exchange_class({
-            'apiKey': api_key,
-            'secret': api_secret,
-            'enableRateLimit': True,
-            'options': {'defaultType': 'spot'},
-        })
+        exchange = exchange_class(
+            {
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+                "options": {
+                    "defaultType": "spot",
+                    # Pre-set fetchCurrencies=False so it applies before any load_markets call
+                    "fetchCurrencies": False,
+                },
+            }
+        )
 
         # Apply testnet/sandbox mode on the order-execution exchange only
         # (ExchangeManager keeps mainnet for full OHLCV history)
-        if self.config.LIVE_TESTNET and hasattr(exchange, 'set_sandbox_mode'):
-            try:
-                exchange.set_sandbox_mode(True)
-                self.logger.info("[LiveExecutor] %s TESTNET sandbox mode enabled", exchange_id)
-            except Exception as e:
-                self.logger.warning("[LiveExecutor] set_sandbox_mode failed: %s", e)
+        live_executor = LiveExecutor(self.logger, self.config, exchange)
 
-        return LiveExecutor(self.logger, self.config, exchange)
+        if self.config.LIVE_TESTNET:
+            if exchange_id == "binance":
+                # For demo mode: markets are loaded in LiveExecutor.startup() which
+                # uses mainnet public URLs first, then switches to demo-api.binance.com.
+                # Do NOT patch URLs here — startup() handles the switch after load_markets.
+                exchange.options["fetchCurrencies"] = False
+                self.logger.info(
+                    "[LiveExecutor] %s DEMO API mode — will switch URLs after market load",
+                    exchange_id,
+                )
+            elif hasattr(exchange, "set_sandbox_mode"):
+                try:
+                    exchange.set_sandbox_mode(True)
+                    self.logger.info(
+                        "[LiveExecutor] %s TESTNET sandbox mode enabled", exchange_id
+                    )
+                except Exception as e:
+                    self.logger.warning("[LiveExecutor] set_sandbox_mode failed: %s", e)
 
-    async def _create_execution_engine(self, symbol, order_executor, trading_strategy, infra=None):
+        return live_executor
+
+    async def _create_execution_engine(
+        self, symbol, order_executor, trading_strategy, infra=None
+    ):
         """Create and configure the Layer 2 Execution Engine.
 
         Creates a ccxt.pro WebSocket exchange (or MT5 polling stream) for
         real-time price streaming and wires it into the execution engine.
         """
-        from src.execution import ExecutionEngine, SignalBus, PriceStream, PositionMonitor
+        from src.execution import (
+            ExecutionEngine,
+            SignalBus,
+            PriceStream,
+            PositionMonitor,
+        )
         from src.dashboard.dashboard_state import dashboard_state
 
         signal_bus = SignalBus()
@@ -613,44 +801,67 @@ class CompositionRoot:
         # MT5 mode — use polling-based price stream instead of WebSocket
         if self.config.MT5_ENABLED:
             from src.execution.mt5_price_stream import MT5PriceStream
-            exchange_manager = infra.get('exchange_manager') if infra else None
-            mt5_exchange = exchange_manager.exchanges.get('mt5') if exchange_manager else None
+
+            exchange_manager = infra.get("exchange_manager") if infra else None
+            mt5_exchange = (
+                exchange_manager.exchanges.get("mt5") if exchange_manager else None
+            )
             if not mt5_exchange:
-                self.logger.error("[Engine] MT5 exchange not available. Layer 2 disabled.")
+                self.logger.error(
+                    "[Engine] MT5 exchange not available. Layer 2 disabled."
+                )
                 return None
 
-            price_stream = MT5PriceStream(self.logger, mt5_exchange, symbol, poll_interval=2.0)
+            price_stream = MT5PriceStream(
+                self.logger, mt5_exchange, symbol, poll_interval=2.0
+            )
             engine_label = "MT5 polling"
         else:
             # CCXT WebSocket mode
-            exchange_id = self.config.LIVE_EXCHANGE if self.config.LIVE_TRADING_ENABLED else "binance"
+            exchange_id = (
+                self.config.LIVE_EXCHANGE
+                if self.config.LIVE_TRADING_ENABLED
+                else "binance"
+            )
             try:
                 import ccxt.pro as ccxt_pro
+
                 exchange_class = getattr(ccxt_pro, exchange_id, None)
                 if not exchange_class:
-                    self.logger.error("[Engine] Exchange '%s' not found in ccxt.pro. Layer 2 disabled.", exchange_id)
+                    self.logger.error(
+                        "[Engine] Exchange '%s' not found in ccxt.pro. Layer 2 disabled.",
+                        exchange_id,
+                    )
                     return None
 
-                ws_exchange_config = {'enableRateLimit': True, 'options': {'defaultType': 'spot'}}
-                if self.config.LIVE_TRADING_ENABLED:
-                    api_key = self.config.BINANCE_API_KEY
-                    api_secret = self.config.BINANCE_API_SECRET
-                    if api_key and api_secret:
-                        ws_exchange_config['apiKey'] = api_key
-                        ws_exchange_config['secret'] = api_secret
+                # PriceStream uses watch_ticker (public feed) — no API keys needed.
+                # Passing keys would cause ccxt.pro to open a user-data WebSocket which
+                # requires sapi endpoints that don't exist on testnet/demo.
+                ws_exchange_config = {
+                    "enableRateLimit": True,
+                    "options": {"defaultType": "spot"},
+                }
 
                 ws_exchange = exchange_class(ws_exchange_config)
 
-                # Switch WebSocket to testnet (Binance: testnet.binance.vision)
-                if self.config.LIVE_TRADING_ENABLED and getattr(self.config, 'LIVE_TESTNET', False):
-                    if hasattr(ws_exchange, 'set_sandbox_mode'):
+                # No testnet override needed: public ticker WebSocket uses mainnet streams
+                # regardless of where orders go (demo-api uses the same market data).
+                if False:  # kept for structure, never executed
+                    if hasattr(ws_exchange, "set_sandbox_mode"):
                         try:
-                            ws_exchange.set_sandbox_mode(True)
-                            self.logger.info("[Engine] %s WebSocket TESTNET mode enabled", exchange_id)
+                            if exchange_id == "binance":
+                                pass
+                            else:
+                                ws_exchange.set_sandbox_mode(True)
                         except Exception as e:
-                            self.logger.warning("[Engine] WS set_sandbox_mode failed: %s", e)
+                            self.logger.warning(
+                                "[Engine] WS set_sandbox_mode failed: %s", e
+                            )
             except Exception as e:
-                self.logger.error("[Engine] Failed to create WebSocket exchange: %s. Layer 2 disabled.", e)
+                self.logger.error(
+                    "[Engine] Failed to create WebSocket exchange: %s. Layer 2 disabled.",
+                    e,
+                )
                 return None
 
             price_stream = PriceStream(self.logger, ws_exchange, symbol)
@@ -658,6 +869,7 @@ class CompositionRoot:
 
         # Use the order executor from Layer 1 (shared)
         from src.trading.order_executor import DemoExecutor
+
         executor = order_executor or DemoExecutor(self.logger, self.config)
 
         position_monitor = PositionMonitor(self.logger, self.config, executor)
@@ -674,7 +886,8 @@ class CompositionRoot:
 
         self.logger.info(
             "[Engine] Layer 2 configured: symbol=%s, stream=%s, trailing=%s, partial=%s",
-            symbol, engine_label,
+            symbol,
+            engine_label,
             self.config.EXECUTION_TRAILING_ENABLED,
             self.config.EXECUTION_PARTIAL_ENABLED,
         )
@@ -685,28 +898,37 @@ class CompositionRoot:
         """Provision notification services."""
         notifier = None
         task = None
-        
-        if self.config.DISCORD_BOT_ENABLED and hasattr(self.config, 'BOT_TOKEN_DISCORD') and self.config.BOT_TOKEN_DISCORD:
+
+        if (
+            self.config.DISCORD_BOT_ENABLED
+            and hasattr(self.config, "BOT_TOKEN_DISCORD")
+            and self.config.BOT_TOKEN_DISCORD
+        ):
             try:
                 import discord
                 from src.notifiers.filehandler_components import (
-                    TrackingPersistence, MessageTracker, CleanupScheduler, MessageDeleter
+                    TrackingPersistence,
+                    MessageTracker,
+                    CleanupScheduler,
+                    MessageDeleter,
                 )
                 from src.notifiers.filehandler import DiscordFileHandler
-                
+
                 intents = discord.Intents.default()
                 intents.message_content = False
                 intents.reactions = False
                 intents.typing = False
                 intents.presences = False
-                
+
                 bot = discord.Client(intents=intents)
-                
-                persistence = TrackingPersistence("data/tracked_messages.json", self.logger)
+
+                persistence = TrackingPersistence(
+                    "data/tracked_messages.json", self.logger
+                )
                 tracker = MessageTracker(persistence, self.logger, self.config)
                 scheduler = CleanupScheduler(7200, self.logger)
                 deleter = MessageDeleter(bot, self.logger)
-                
+
                 file_handler = DiscordFileHandler(
                     bot=bot,
                     logger=self.logger,
@@ -714,32 +936,46 @@ class CompositionRoot:
                     persistence=persistence,
                     tracker=tracker,
                     scheduler=scheduler,
-                    deleter=deleter
+                    deleter=deleter,
                 )
-                
+
                 notifier = DiscordNotifier(
-                    self.logger, self.config, utils['parser'], 
-                    utils['format_utils'], bot, file_handler
+                    self.logger,
+                    self.config,
+                    utils["parser"],
+                    utils["format_utils"],
+                    bot,
+                    file_handler,
                 )
-                
+
                 task = asyncio.create_task(notifier.start())
                 await notifier.wait_until_ready()
             except Exception as e:
-                self.logger.warning("Discord initialization failed: %s. Falling back to console output.", e)
-                notifier = ConsoleNotifier(self.logger, self.config, utils['parser'], utils['format_utils'])
+                self.logger.warning(
+                    "Discord initialization failed: %s. Falling back to console output.",
+                    e,
+                )
+                notifier = ConsoleNotifier(
+                    self.logger, self.config, utils["parser"], utils["format_utils"]
+                )
         else:
-            notifier = ConsoleNotifier(self.logger, self.config, utils['parser'], utils['format_utils'])
-            
-        return {'notifier': notifier, 'task': task}
-    
+            notifier = ConsoleNotifier(
+                self.logger, self.config, utils["parser"], utils["format_utils"]
+            )
+
+        return {"notifier": notifier, "task": task}
+
     async def run_async(self):
         """Async entry point for the application."""
+
         def _asyncio_exception_handler(loop, context):
             exc = context.get("exception")
             msg = context.get("message", "Unknown asyncio error")
             if exc is not None:
                 if isinstance(exc, KeyboardInterrupt):
-                    self.logger.debug("Asyncio task KeyboardInterrupt during shutdown: %s", msg)
+                    self.logger.debug(
+                        "Asyncio task KeyboardInterrupt during shutdown: %s", msg
+                    )
                     return
                 self.logger.error("Asyncio unhandled exception: %s", msg, exc_info=exc)
             else:
@@ -751,16 +987,16 @@ class CompositionRoot:
         dependencies = await self.build_dependencies()
 
         # Extract dashboard_server before passing to bot (bot doesn't accept it)
-        dashboard_server = dependencies.pop('dashboard_server', None)
-        order_executor = dependencies.pop('order_executor', None)
+        dashboard_server = dependencies.pop("dashboard_server", None)
+        order_executor = dependencies.pop("order_executor", None)
         # Keep strategy reference for execution engine wiring
-        trading_strategy = dependencies['trading_strategy']
+        trading_strategy = dependencies["trading_strategy"]
 
         bot = CryptoTradingBot(
             logger=self.logger,
             config=self.config,
             shutdown_manager=self.shutdown_manager,
-            **dependencies
+            **dependencies,
         )
 
         try:
@@ -772,14 +1008,20 @@ class CompositionRoot:
                 dashboard_server.set_bot(bot)
 
             # Register live executor for graceful exchange disconnect
-            if order_executor and hasattr(order_executor, 'close'):
+            if order_executor and hasattr(order_executor, "close"):
                 self.shutdown_manager.register_shutdown_callback(order_executor.close)
+
+            # For LiveExecutor in testnet/demo mode: pre-load markets on mainnet
+            # public URLs, then switch private URLs to demo-api.binance.com.
+            if order_executor and hasattr(order_executor, "startup"):
+                await order_executor.startup()
 
             symbol = self.config.CRYPTO_PAIR
             timeframe = self.config.TIMEFRAME
 
             # --- Layer 2: Execution Engine (real-time monitoring) ---
             execution_engine = None
+
             async def _recreate_execution_engine(active_symbol: str):
                 """Close any existing execution engine and recreate it for the
                 given symbol. Returns the new engine (or None if disabled)."""
@@ -788,12 +1030,16 @@ class CompositionRoot:
                     try:
                         await execution_engine.close()
                     except Exception as close_err:
-                        self.logger.warning("[Engine] close() raised during re-creation: %s", close_err)
+                        self.logger.warning(
+                            "[Engine] close() raised during re-creation: %s", close_err
+                        )
                     execution_engine = None
 
                 if not self.config.EXECUTION_ENGINE_ENABLED:
                     return None
-                engine_infra = {'exchange_manager': dependencies.get('exchange_manager')}
+                engine_infra = {
+                    "exchange_manager": dependencies.get("exchange_manager")
+                }
                 engine = await self._create_execution_engine(
                     active_symbol, order_executor, trading_strategy, infra=engine_infra
                 )
@@ -822,11 +1068,18 @@ class CompositionRoot:
                     self.logger.info("Dashboard: starting...")
                     await dashboard_server.start()
                     dashboard_running = True
-                    self.logger.info("Dashboard live at http://localhost:%s", self.config.DASHBOARD_PORT)
+                    self.logger.info(
+                        "Dashboard live at http://localhost:%s",
+                        self.config.DASHBOARD_PORT,
+                    )
 
-            bot.keyboard_handler.register_command('d', _toggle_dashboard, "Toggle dashboard on/off")
+            bot.keyboard_handler.register_command(
+                "d", _toggle_dashboard, "Toggle dashboard on/off"
+            )
 
-            self.logger.info("Keyboard commands: 'a' = force analysis, 'd' = toggle dashboard, 'h' = help, 'q' = quit")
+            self.logger.info(
+                "Keyboard commands: 'a' = force analysis, 'd' = toggle dashboard, 'h' = help, 'q' = quit"
+            )
 
             # Auto-start dashboard if enabled in config (fire-and-forget task)
             if dashboard_server and self.config.DASHBOARD_ENABLED:
@@ -857,11 +1110,14 @@ class CompositionRoot:
 
                 self.logger.warning(
                     "[SWITCH] Bot exited; re-launching on new symbol: %s -> %s",
-                    symbol, new_sym,
+                    symbol,
+                    new_sym,
                 )
                 bot._switch_requested = None
                 symbol = new_sym
-                timeframe = self.config.TIMEFRAME  # allow timeframe override via config too
+                timeframe = (
+                    self.config.TIMEFRAME
+                )  # allow timeframe override via config too
                 # Reset runtime flags so bot.run() can restart cleanly
                 bot.running = True
                 bot._force_analysis.clear()
@@ -877,13 +1133,15 @@ class CompositionRoot:
             # Clean up dashboard server
             if dashboard_server:
                 await dashboard_server.stop()
-    
+
     def start(self):
         """Main entry point with clean shutdown delegation."""
         # Use a per-profile lock name so multiple profiles can run in parallel.
         profile_name = os.environ.get("LLM_TRADER_PROFILE", "default")
-        single_instance_lock = SingleInstanceLock(app_name=f".llm_trader_{profile_name}.lock")
-        
+        single_instance_lock = SingleInstanceLock(
+            app_name=f".llm_trader_{profile_name}.lock"
+        )
+
         if not single_instance_lock.acquire():
             if PYQT_AVAILABLE:
                 app = QApplication.instance()
@@ -896,25 +1154,25 @@ class CompositionRoot:
                     None,
                     "Crypto Trading Bot",
                     "Another instance of Crypto Trading Bot is already running.",
-                    QMessageBox.StandardButton.Ok
+                    QMessageBox.StandardButton.Ok,
                 )
             else:
                 print("Another instance of Crypto Trading Bot is already running.")
             sys.exit(1)
-        
-        if sys.platform == 'win32':
+
+        if sys.platform == "win32":
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        
+
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        
+
         self.shutdown_manager = GracefulShutdownManager(
             self.loop,
             logger=self.logger,
-            confirmation_callback=GracefulShutdownManager.show_exit_confirmation
+            confirmation_callback=GracefulShutdownManager.show_exit_confirmation,
         )
         self.shutdown_manager.setup_signal_handlers()
-        
+
         try:
             self.loop.run_until_complete(self.run_async())
         except KeyboardInterrupt:
@@ -932,6 +1190,7 @@ if __name__ == "__main__":
     # The config loader reads sys.argv directly (see _resolve_active_config_path),
     # but we also set the env var so child helpers can read it.
     import argparse
+
     _pre_parser = argparse.ArgumentParser(add_help=False)
     _pre_parser.add_argument("--profile", type=str, default=None)
     _pre_args, _ = _pre_parser.parse_known_args()

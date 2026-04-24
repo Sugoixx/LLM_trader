@@ -119,6 +119,7 @@ class CryptoTradingBot:
 
         # Fast Trading Mode — algo consensus trader (stateless helper)
         self._fast_trader = AlgoFastTrader()
+        self.last_llm_signal: Optional[str] = None
 
         # Fast Trading Mode — safety guards (min-interval / daily loss / streak cooldown)
         _ft_cfg = FastTradingConfig(
@@ -527,6 +528,14 @@ class CryptoTradingBot:
             self.logger.error("Analysis failed: %s", result["error"])
             return
 
+        # Extract LLM signal for Fast Trading consensus
+        raw_response = result.get("raw_response", "")
+        if raw_response:
+            llm_signal, _, _, _, _, _, _ = (
+                self.trading_strategy.extractor.extract_trading_info(raw_response)
+            )
+            self.last_llm_signal = llm_signal
+
         # Broadcast latest algo strategy signals to dashboard via WebSocket
         if self.dashboard_state and getattr(
             self.market_analyzer, "last_algo_signals", None
@@ -579,7 +588,7 @@ class CryptoTradingBot:
         if not decision and not ai_decision:
             self.logger.info(
                 "No trading action taken (fast_mode=%s, double_trade=%s) \u2014 "
-                "check preceding logs for [BUY-BLOCKED] reasons if the LLM signalled BUY/SELL",
+                "check preceding logs for details",
                 fast_mode,
                 bool(getattr(self.config, "DOUBLE_TRADE_ENABLED", False)),
             )
@@ -627,7 +636,7 @@ class CryptoTradingBot:
         signals = algo_data.get("signals", [])
         market_condition = algo_data.get("market_condition")
         signal, confidence, reasoning = self._fast_trader.decide(
-            signals, market_condition
+            signals, market_condition, self.last_llm_signal
         )
 
         regime = None
@@ -689,9 +698,7 @@ class CryptoTradingBot:
         )
         # Record consensus for dashboard diagnostics (even if HOLD/blocked)
         try:
-            self._fast_guard.record_consensus(
-                f"{signal} | {confidence} — {reasoning}"
-            )
+            self._fast_guard.record_consensus(f"{signal} | {confidence} — {reasoning}")
         except Exception:  # pragma: no cover
             pass
 
@@ -909,17 +916,19 @@ class CryptoTradingBot:
         return False, "LLM response did not contain GAP_OK/GAP_NO verdict"
 
     async def _fast_trading_loop(self) -> None:
-        """Independent fast-trading poll loop.
+        """Independent algo poll loop (always active).
 
         Runs every ``FAST_POLL_INTERVAL_SECONDS`` (default 5 min) regardless of
         the main LLM timeframe.  On each tick it:
           1. Fetches fresh short-interval OHLCV candles from the exchange (no LLM).
           2. Runs the algo signal layer (pure Python indicators).
-          3. Calls ``_execute_fast_trade_core()`` — safety guards apply as normal.
+          3. Updates the dashboard with fresh signals unconditionally.
+          4. Calls ``_execute_fast_trade_core()`` **only** when fast trading is enabled.
 
-        This means the bot can enter/exit positions every 5 minutes in Fast Mode
-        while the LLM still runs at its own configured cadence (e.g. every 30 min)
-        as an independent correction layer.
+        When ``fast_trading_enabled = False``: analysis and dashboard updates still
+        run for monitoring purposes — no trade orders are placed.
+        When ``fast_trading_enabled = True``: the bot can enter/exit positions every
+        5 minutes while the LLM runs at its own cadence as a correction layer.
         """
         FAST_OHLCV_TIMEFRAME = "5m"  # candle granularity for algo evaluation
         # Keep a margin above the strict minimum required by current fast
@@ -945,19 +954,13 @@ class CryptoTradingBot:
                 fast_mode = bool(
                     self.dashboard_state and self.dashboard_state.fast_trading_enabled
                 )
-                if not fast_mode:
-                    if _tick % _idle_log_every_n == 0:
-                        self.logger.info(
-                            "[FastLoop] Idle — Fast Trading Mode is OFF "
-                            "(toggle in dashboard to enable)"
-                        )
-                    continue  # keep the task alive, just idle until enabled
 
                 signal_layer = getattr(self.market_analyzer, "signal_layer", None)
                 if not (signal_layer and self.current_exchange and self.current_symbol):
                     self.logger.info(
                         "[FastLoop] SKIP — not ready: signal_layer=%s exchange=%s symbol=%s",
-                        bool(signal_layer), bool(self.current_exchange),
+                        bool(signal_layer),
+                        bool(self.current_exchange),
                         bool(self.current_symbol),
                     )
                     continue
@@ -1003,11 +1006,18 @@ class CryptoTradingBot:
                                 "[FastLoop] Broadcast algo signals failed: %s", _be
                             )
 
+                    if not fast_mode:
+                        if _tick % _idle_log_every_n == 0:
+                            self.logger.info(
+                                "[FastLoop] Analysis mode — Fast Trading OFF, but signals updating"
+                            )
+
                     # ── 3. Execute trade decision via shared core (guards apply) ──
-                    async with self._fast_trade_lock:
-                        await self._execute_fast_trade_core(
-                            algo_data, current_price, source="poll"
-                        )
+                    if fast_mode:
+                        async with self._fast_trade_lock:
+                            await self._execute_fast_trade_core(
+                                algo_data, current_price, source="poll"
+                            )
 
                 except asyncio.CancelledError:
                     raise
@@ -1054,9 +1064,7 @@ class CryptoTradingBot:
                 # In fast mode the algo owns the 'fast' slot. If only 'ai' is
                 # open (single-slot mode), fall back to closing it instead.
                 target_source = (
-                    "fast"
-                    if "fast" in self.trading_strategy.positions
-                    else "ai"
+                    "fast" if "fast" in self.trading_strategy.positions else "ai"
                 )
                 self.logger.info(
                     "[Fast/LLM-Correction] AI says %s (%s) — closing %s "
@@ -1759,11 +1767,13 @@ class CryptoTradingBot:
                             except Exception as e:
                                 self.logger.warning(
                                     "Error sending [%s] position status: %s",
-                                    slot_source.upper(), e,
+                                    slot_source.upper(),
+                                    e,
                                 )
                         self.logger.debug(
                             "Sent hourly position status update to Discord "
-                            "(%d slot(s))", len(open_positions),
+                            "(%d slot(s))",
+                            len(open_positions),
                         )
                     except Exception as e:
                         self.logger.warning(
