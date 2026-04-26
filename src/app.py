@@ -131,6 +131,11 @@ class CryptoTradingBot:
             consecutive_loss_cooldown_seconds=getattr(
                 config, "FAST_CONSECUTIVE_LOSS_COOLDOWN_SECONDS", 7200
             ),
+            min_confidence=getattr(config, "FAST_MIN_CONFIDENCE", "MEDIUM"),
+            min_rr_after_fees=getattr(config, "FAST_MIN_RR_AFTER_FEES", 0.0),
+            max_signal_age_seconds=getattr(
+                config, "FAST_MAX_SIGNAL_AGE_SECONDS", 900
+            ),
         )
         self._fast_guard = FastTradingSafetyGuard(
             logger=self.logger,
@@ -710,9 +715,20 @@ class CryptoTradingBot:
             await self._broadcast_fast_guard_state()
             return None
 
+        has_fast_open = self.trading_strategy.has_position("fast")
+        is_new_fast_open = (signal in ("BUY", "SELL")) and not has_fast_open
+
+        if is_new_fast_open:
+            block_reason = self._check_fast_entry_quality(algo_data, confidence)
+            if block_reason:
+                _record_fast_snapshot("BLOCKED", block_reason)
+                self.logger.warning("[Fast/%s] BLOCKED: %s", source, block_reason)
+                await self._broadcast_fast_guard_state()
+                return None
+
         # ── Safety guards: min-interval, daily loss limit, loss-streak cooldown ──
-        has_open = self.trading_strategy.current_position is not None
-        guard = self._fast_guard.check(has_open_position=has_open)
+        self._refresh_fast_guard_config()
+        guard = self._fast_guard.check(has_open_position=has_fast_open)
         await self._broadcast_fast_guard_state()
         if not guard.allowed:
             _record_fast_snapshot("BLOCKED", guard.reason)
@@ -725,8 +741,7 @@ class CryptoTradingBot:
         # ── Market-hours proximity guard: block NEW opens before market close ──
         # Exits (CLOSE signals / opposing signals that close an existing position)
         # are always allowed — we never trap the bot inside a closing market.
-        is_new_open = (signal in ("BUY", "SELL")) and not has_open
-        if is_new_open:
+        if is_new_fast_open:
             blocked, reason = await self._check_market_close_proximity(
                 signal, reasoning
             )
@@ -738,7 +753,8 @@ class CryptoTradingBot:
 
         market_conditions_for_risk = {}
         if isinstance(market_condition, dict):
-            market_conditions_for_risk = market_condition
+            market_conditions_for_risk = dict(market_condition)
+        market_conditions_for_risk.setdefault("symbol", self.current_symbol or "")
 
         decision = await self.trading_strategy.process_algo_decision(
             signal=signal,
@@ -755,11 +771,94 @@ class CryptoTradingBot:
         await self._broadcast_fast_guard_state()
         return decision
 
+    def _check_fast_entry_quality(
+        self, algo_data: Dict[str, Any], confidence: str
+    ) -> Optional[str]:
+        """Return a blocking reason for weak/stale fast entries, else None."""
+        min_conf = str(getattr(self.config, "FAST_MIN_CONFIDENCE", "LOW")).upper()
+        rank = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+        required = rank.get(min_conf, 1)
+        actual = rank.get(str(confidence).upper(), 1)
+        if actual < required:
+            return (
+                f"fast confidence {confidence} below required {min_conf} "
+                "(config [fast_trading].min_confidence)"
+            )
+
+        max_age = int(getattr(self.config, "FAST_MAX_SIGNAL_AGE_SECONDS", 0) or 0)
+        if max_age <= 0:
+            return None
+
+        age = self._fast_signal_age_seconds(algo_data)
+        if age is None:
+            return (
+                "fast signal timestamp missing/invalid "
+                "(config [fast_trading].max_signal_age_seconds)"
+            )
+        if age > max_age:
+            return (
+                f"fast signal is stale: {age}s old > {max_age}s "
+                "(config [fast_trading].max_signal_age_seconds)"
+            )
+        return None
+
+    @staticmethod
+    def _fast_signal_age_seconds(algo_data: Dict[str, Any]) -> Optional[int]:
+        ts_raw = algo_data.get("timestamp")
+        if not ts_raw:
+            return None
+        try:
+            ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        return max(0, int(age))
+
+    def _refresh_fast_guard_config(self) -> None:
+        """Keep fast guard thresholds in sync with runtime settings."""
+        cfg = self._fast_guard.config
+        cfg.min_interval_seconds = int(
+            getattr(self.config, "FAST_MIN_INTERVAL_SECONDS", cfg.min_interval_seconds)
+        )
+        cfg.daily_loss_pct_limit = float(
+            getattr(self.config, "FAST_DAILY_LOSS_PCT_LIMIT", cfg.daily_loss_pct_limit)
+        )
+        cfg.consecutive_loss_threshold = int(
+            getattr(
+                self.config,
+                "FAST_CONSECUTIVE_LOSS_THRESHOLD",
+                cfg.consecutive_loss_threshold,
+            )
+        )
+        cfg.consecutive_loss_cooldown_seconds = int(
+            getattr(
+                self.config,
+                "FAST_CONSECUTIVE_LOSS_COOLDOWN_SECONDS",
+                cfg.consecutive_loss_cooldown_seconds,
+            )
+        )
+        cfg.min_confidence = str(
+            getattr(self.config, "FAST_MIN_CONFIDENCE", cfg.min_confidence)
+        ).upper()
+        cfg.min_rr_after_fees = float(
+            getattr(self.config, "FAST_MIN_RR_AFTER_FEES", cfg.min_rr_after_fees)
+        )
+        cfg.max_signal_age_seconds = int(
+            getattr(
+                self.config,
+                "FAST_MAX_SIGNAL_AGE_SECONDS",
+                cfg.max_signal_age_seconds,
+            )
+        )
+
     async def _broadcast_fast_guard_state(self) -> None:
         """Push current safety-guard state to the dashboard (best-effort)."""
         if not self.dashboard_state:
             return
         try:
+            self._refresh_fast_guard_config()
             snap = self._fast_guard.snapshot()
             await self.dashboard_state.update_fast_guard(snap)
         except Exception as e:  # pylint: disable=broad-exception-caught
@@ -930,10 +1029,10 @@ class CryptoTradingBot:
         When ``fast_trading_enabled = True``: the bot can enter/exit positions every
         5 minutes while the LLM runs at its own cadence as a correction layer.
         """
-        FAST_OHLCV_TIMEFRAME = "5m"  # candle granularity for algo evaluation
+        fast_ohlcv_timeframe = str(getattr(self.config, "FAST_TIMEFRAME", "5m"))
         # Keep a margin above the strict minimum required by current fast
         # strategies (BollingerReversion needs 220 bars: SMA200 + BB20).
-        FAST_OHLCV_LIMIT = 260
+        fast_ohlcv_limit = max(260, int(getattr(self.config, "FAST_OHLCV_LIMIT", 260)))
 
         interval = self.config.FAST_POLL_INTERVAL_SECONDS
         self.logger.info(
@@ -969,8 +1068,8 @@ class CryptoTradingBot:
                     # ── 1. Fetch fresh short-interval candles (no LLM cost) ──
                     raw_ohlcv = await self.current_exchange.fetch_ohlcv(
                         self.current_symbol,
-                        timeframe=FAST_OHLCV_TIMEFRAME,
-                        limit=FAST_OHLCV_LIMIT,
+                        timeframe=fast_ohlcv_timeframe,
+                        limit=fast_ohlcv_limit,
                     )
                     if not raw_ohlcv or len(raw_ohlcv) < 30:
                         self.logger.info(

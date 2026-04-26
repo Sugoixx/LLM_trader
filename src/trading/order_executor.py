@@ -259,7 +259,7 @@ class LiveExecutor:
             balances = response.get("balances", [])
             for b in balances:
                 if b.get("asset") == currency:
-                    return float(b.get("free", 0))
+                    return float(b.get("free", 0.0))
             return 0.0
         except Exception:
             # Fallback to standard fetch_balance
@@ -332,19 +332,18 @@ class LiveExecutor:
         return constraints
 
     async def modify_position(self, symbol: str, sl: float, tp: float, source: str = "ai") -> bool:
-        """Place an OCO order (SL + TP) to protect the open LONG position on Binance spot.
+        """Place SL/TP protection for an open position.
 
-        On Binance spot demo/mainnet, places a SELL OCO:
-          - Limit leg  → take-profit (executes when price reaches TP)
-          - Stop-limit leg → stop-loss (triggers + executes when price drops to SL)
+        On Binance spot: places separate stop-limit and limit orders (OCO not supported for all symbols).
+        On Binance futures: uses OCO or separate orders depending on market support.
 
         Any previous protection orders for the symbol are cancelled first.
-        Returns True on success, False if OCO is unsupported or an error occurs.
+        Returns True on success, False if protection cannot be placed.
         """
         exchange_id = getattr(self.exchange, "id", "")
         if exchange_id != "binance":
             self.logger.warning(
-                "[LIVE] modify_position: OCO not implemented for exchange '%s' — "
+                "[LIVE] modify_position: not implemented for exchange '%s' — "
                 "SL/TP will be managed by the bot internally.",
                 exchange_id,
             )
@@ -352,17 +351,44 @@ class LiveExecutor:
 
         quantity = self._last_fill.get(symbol, 0.0)
         if quantity <= 0:
+            # Try to get actual position size from exchange
+            try:
+                positions = await self.exchange.fetch_positions([symbol])
+                if positions:
+                    pos = positions[0]
+                    # Extract quantity from position data
+                    qty_str = pos.get("contracts") or pos.get("amount") or 0.0
+                    quantity = float(qty_str)
+                    if quantity > 0:
+                        self._last_fill[symbol] = quantity
+                        self.logger.info(
+                            "[LIVE] Found position for %s: qty=%.6f",
+                            symbol, quantity
+                        )
+            except Exception as e:
+                self.logger.debug("Could not fetch position for %s: %s", symbol, e)
+
+        if quantity <= 0:
             self.logger.warning(
-                "[LIVE] modify_position: no tracked fill for %s — cannot size OCO",
+                "[LIVE] modify_position: no tracked fill for %s — cannot size protection orders",
                 symbol,
             )
             return False
+
+        # Determine market type (spot vs futures)
+        market_type = "spot"
+        try:
+            default_type = (self.exchange.options or {}).get("defaultType", "spot")
+            if default_type in ("future", "swap", "margin"):
+                market_type = "futures"
+        except Exception:
+            pass
 
         # Cancel existing protection orders before placing new ones
         await self._cancel_protection_orders(symbol)
 
         try:
-            # Price precision for the symbol (use exchange helper when available)
+            # Price precision for the symbol
             def _fmt(p: float) -> float:
                 try:
                     return float(self.exchange.price_to_precision(symbol, p))
@@ -371,40 +397,65 @@ class LiveExecutor:
 
             tp_price = _fmt(tp)
             sl_trigger = _fmt(sl)
-            # Stop-limit execution price: 0.2% below trigger to absorb slippage
-            sl_limit = _fmt(sl * 0.998)
+            sl_limit = _fmt(sl * 0.998)  # 0.2% below trigger for slippage
 
-            oco = await self.exchange.create_order(
-                symbol,
-                "oco",
-                "sell",
-                quantity,
-                tp_price,
-                params={
-                    "stopPrice": sl_trigger,
-                    "stopLimitPrice": sl_limit,
-                    "stopLimitTimeInForce": "GTC",
-                },
+            # Try OCO first for futures, or if explicitly supported
+            oco_supported = self.exchange.has.get("createOrderOco", False)
+            if market_type == "futures" or oco_supported:
+                try:
+                    oco = await self.exchange.create_order(
+                        symbol,
+                        "oco",
+                        "sell",
+                        quantity,
+                        tp_price,
+                        params={
+                            "stopPrice": sl_trigger,
+                            "stopLimitPrice": sl_limit,
+                            "stopLimitTimeInForce": "GTC",
+                        },
+                    )
+                    list_id = str((oco.get("info") or {}).get("orderListId", ""))
+                    if list_id:
+                        self._oco_list_ids[symbol] = list_id
+                    self.logger.info(
+                        "[LIVE] [%s] OCO protection placed — SL=%.2f TP=%.2f qty=%.6f%s",
+                        source.upper(), sl, tp, quantity,
+                        f" listId={list_id}" if list_id else "",
+                    )
+                    return True
+                except (ccxt.NotSupported, ccxt.InvalidOrder, ccxt.ExchangeError):
+                    self.logger.debug("[LIVE] OCO not supported, falling back to separate orders")
+
+            # Fallback: place separate SL (stop-limit) and TP (limit) orders
+            # Place TP order (limit sell)
+            tp_order = await self.exchange.create_order(
+                symbol, "limit", "sell", quantity, tp_price,
+                params={"timeInForce": "GTC"}
+            )
+            self.logger.info(
+                "[LIVE] [%s] TP order placed — TP=%.2f qty=%.6f orderId=%s",
+                source.upper(), tp, quantity, tp_order.get("id", "N/A"),
             )
 
-            list_id = str((oco.get("info") or {}).get("orderListId", ""))
-            if list_id:
-                self._oco_list_ids[symbol] = list_id
-
+            # Place SL order (stop-limit sell)
+            sl_order = await self.exchange.create_order(
+                symbol, "stop_limit", "sell", quantity, sl_limit,
+                params={"stopPrice": sl_trigger, "timeInForce": "GTC"}
+            )
             self.logger.info(
-                "[LIVE] [%s] OCO protection placed — SL=%.2f TP=%.2f qty=%.6f%s",
-                source.upper(), sl, tp, quantity,
-                f" listId={list_id}" if list_id else "",
+                "[LIVE] [%s] SL order placed — SL=%.2f qty=%.6f orderId=%s",
+                source.upper(), sl, quantity, sl_order.get("id", "N/A"),
             )
             return True
 
         except (ccxt.NotSupported, ccxt.InvalidOrder, ccxt.ExchangeError) as e:
             self.logger.warning(
-                "[LIVE] OCO placement failed — position has no broker-side SL/TP: %s", e
+                "[LIVE] Protection placement failed — position has no broker-side SL/TP: %s", e
             )
             return False
         except Exception as e:
-            self.logger.error("[LIVE] Unexpected error placing OCO: %s", e)
+            self.logger.error("[LIVE] Unexpected error placing protection: %s", e)
             return False
 
     @property
@@ -517,6 +568,13 @@ class LiveExecutor:
             fee_cost = float(fee_info.get("cost", 0) or 0)
             fee_curr = str(fee_info.get("currency", quote_currency) or quote_currency)
             status = raw_order.get("status", "unknown")
+
+            # Log full Binance response for debugging
+            self.logger.info(
+                "[LIVE] Binance order response: id=%s, status=%s, filled=%.6f, "
+                "avg_price=%.2f, fee=%.4f %s, raw=%s",
+                order_id, status, filled, avg_fill, fee_cost, fee_curr, raw_order
+            )
 
             self.logger.info(
                 "[LIVE] Order %s placed — status: %s, filled: %.6f @ $%.2f, fee: %.4f %s",

@@ -61,6 +61,10 @@ class MarketDataFetcher:
 
     async def fetch_price_data(self, top_coins: List[str]) -> Optional[Dict]:
         """Fetch price data for top coins using CCXT or fallback to CryptoCompare."""
+        if not top_coins:
+            self.logger.warning("No top coins provided to fetch_price_data")
+            return None
+
         price_data = None
         try:
             price_data = await self._try_ccxt_price_data(top_coins)
@@ -76,6 +80,8 @@ class MarketDataFetcher:
                 except Exception as e:
                     self.logger.error("Error fetching CryptoCompare price data: %s", e)
 
+        if not price_data:
+            self.logger.warning("No price data fetched for top coins: %s", top_coins)
 
         return price_data
 

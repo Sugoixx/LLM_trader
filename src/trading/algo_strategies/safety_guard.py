@@ -4,6 +4,7 @@ Runtime checks that block algo trades when conditions are unsafe:
   - Minimum interval between trades (anti-flip-flop)
   - Daily realised-loss limit (circuit breaker)
   - Consecutive-losses cooldown (losing streak pause)
+  - Entry-quality metadata exposed to the dashboard
 
 These are hard gates — evaluated BEFORE any order is placed.
 """
@@ -28,6 +29,15 @@ class FastTradingConfig:
 
     #: Cooldown duration after consecutive-loss trip (seconds).
     consecutive_loss_cooldown_seconds: int = 7200  # 2h
+
+    #: Minimum consensus confidence required for new fast entries.
+    min_confidence: str = "MEDIUM"
+
+    #: Minimum net reward/risk after fees required for new fast entries.
+    min_rr_after_fees: float = 0.0
+
+    #: Maximum allowed age for cached algo signals used to open entries.
+    max_signal_age_seconds: int = 900
 
 
 @dataclass
@@ -188,14 +198,16 @@ class FastTradingSafetyGuard:
             self.logger.warning("[SafetyGuard] Failed to load history: %s", e)
             history = []
 
-        # --- Last trade timestamp (any action) ---
+        # --- Last fast-trade timestamp (any action) ---
         last_ts = None
         for row in reversed(history):
+            if not self._is_fast_trade(row):
+                continue
             ts_str = row.get("timestamp")
             if not ts_str:
                 continue
             try:
-                ts = datetime.fromisoformat(ts_str)
+                ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 last_ts = ts
@@ -208,13 +220,15 @@ class FastTradingSafetyGuard:
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         daily_pnl_pct_sum = 0.0
         for row in history:
+            if not self._is_fast_trade(row):
+                continue
             if row.get("action") not in self.CLOSE_ACTIONS:
                 continue
             ts_str = row.get("timestamp")
             if not ts_str:
                 continue
             try:
-                ts = datetime.fromisoformat(ts_str)
+                ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
             except (ValueError, TypeError):
@@ -229,6 +243,8 @@ class FastTradingSafetyGuard:
         # --- Consecutive-loss streak ---
         streak = 0
         for row in reversed(history):
+            if not self._is_fast_trade(row):
+                continue
             if row.get("action") not in self.CLOSE_ACTIONS:
                 continue
             pnl_pct = self._extract_pnl_pct(row)
@@ -267,6 +283,20 @@ class FastTradingSafetyGuard:
         return state
 
     @staticmethod
+    def _is_fast_trade(row: Dict[str, Any]) -> bool:
+        """Best-effort source filter for fast-mode history rows."""
+        source = row.get("source")
+        if source is not None:
+            return str(source).lower() == "fast"
+
+        # Backward compatibility for old rows written before the source field:
+        # fast entries usually include the algo reasoning prefix.
+        reasoning = row.get("reasoning", "")
+        return isinstance(reasoning, str) and (
+            "[Fast]" in reasoning or "Fast trader" in reasoning
+        )
+
+    @staticmethod
     def _extract_pnl_pct(row: Dict[str, Any]) -> Optional[float]:
         """Best-effort extraction of P&L% from a close-trade history row."""
         # Direct field if present
@@ -291,13 +321,15 @@ class FastTradingSafetyGuard:
         self, history: List[Dict[str, Any]]
     ) -> Optional[datetime]:
         for row in reversed(history):
+            if not self._is_fast_trade(row):
+                continue
             if row.get("action") not in self.CLOSE_ACTIONS:
                 continue
             ts_str = row.get("timestamp")
             if not ts_str:
                 continue
             try:
-                ts = datetime.fromisoformat(ts_str)
+                ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 return ts
@@ -323,5 +355,8 @@ class FastTradingSafetyGuard:
                 "daily_loss_pct_limit":              self.config.daily_loss_pct_limit,
                 "consecutive_loss_threshold":        self.config.consecutive_loss_threshold,
                 "consecutive_loss_cooldown_seconds": self.config.consecutive_loss_cooldown_seconds,
+                "min_confidence":                    self.config.min_confidence,
+                "min_rr_after_fees":                  self.config.min_rr_after_fees,
+                "max_signal_age_seconds":             self.config.max_signal_age_seconds,
             },
         }

@@ -83,10 +83,11 @@ class MarketMetricsCalculator:
                         self.logger.warning("Insufficient data for 7D metrics. Only %s candles available, need %s", n, required_candles)
                         period_metrics["7D"] = self._calculate_period_metrics(ohlcv, "7D (Partial)", context)
                     elif period_name == "30D" and n >= periods["7D"]:  # Use dynamic 7D requirement
-                        self.logger.warning("Insufficient data for 30D metrics. Only %s candles available, need %s", n, required_candles)
+                        self.logger.info("Partial 30D metrics with %s candles (need %s). Using available data.", n, required_candles)
                         period_metrics["30D"] = self._calculate_period_metrics(ohlcv, "30D (Partial)", context)
                     else:
-                        self.logger.warning("Cannot calculate %s metrics - not enough data (need %s, have %s)", period_name, required_candles, n)
+                        self.logger.info("Using all available %s candles for %s metrics (need %s)", n, period_name, required_candles)
+                        period_metrics[period_name] = self._calculate_period_metrics(ohlcv, f"{period_name} (Partial)", context)
 
             context.market_metrics = period_metrics
 

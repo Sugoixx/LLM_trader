@@ -203,6 +203,9 @@ class ConfigProtocol(Protocol):
     def AI_CONSECUTIVE_LOSS_COOLDOWN_MINUTES(self) -> int: ...
 
     @property
+    def AI_POST_TRADE_COOLDOWN_MINUTES(self) -> int: ...
+
+    @property
     def AI_MIN_RR_AFTER_FEES(self) -> float: ...
 
     # Execution Engine (Layer 2) Configuration
@@ -223,6 +226,43 @@ class ConfigProtocol(Protocol):
 
     @property
     def EXECUTION_PARTIAL_TARGETS(self) -> list: ...
+
+    # Fast Trading Mode Configuration
+    @property
+    def FAST_MIN_INTERVAL_SECONDS(self) -> int: ...
+
+    @property
+    def FAST_DAILY_LOSS_PCT_LIMIT(self) -> float: ...
+
+    @property
+    def FAST_CONSECUTIVE_LOSS_THRESHOLD(self) -> int: ...
+
+    @property
+    def FAST_CONSECUTIVE_LOSS_COOLDOWN_SECONDS(self) -> int: ...
+
+    @property
+    def FAST_MIN_CONFIDENCE(self) -> str: ...
+
+    @property
+    def FAST_MIN_RR_AFTER_FEES(self) -> float: ...
+
+    @property
+    def FAST_MAX_SIGNAL_AGE_SECONDS(self) -> int: ...
+
+    @property
+    def FAST_TIMEFRAME(self) -> str: ...
+
+    @property
+    def FAST_OHLCV_LIMIT(self) -> int: ...
+
+    @property
+    def FAST_POLL_INTERVAL_SECONDS(self) -> int: ...
+
+    @property
+    def FAST_BLOCK_MINUTES_BEFORE_CLOSE(self) -> int: ...
+
+    @property
+    def FAST_ALLOW_GAP_TRADING(self) -> bool: ...
 
     # Live Trading Configuration
     @property

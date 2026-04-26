@@ -30,7 +30,11 @@ class MarketDataProcessor:
             elif 'data' in coingecko_data and 'dominance' in coingecko_data['data']:
                 dominance_data = coingecko_data['data']['dominance']
             else:
-                self.logger.warning("No dominance data found in CoinGecko response")
+                self.logger.warning("No dominance data found in CoinGecko response. Keys: %s", list(coingecko_data.keys()) if coingecko_data else "None")
+                return []
+
+            if not dominance_data:
+                self.logger.warning("Dominance data is empty")
                 return []
 
             # Sort by dominance percentage and extract top symbols

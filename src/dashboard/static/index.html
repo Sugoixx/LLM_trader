@@ -73,6 +73,9 @@
                 <span class="tab-btn" data-target="tab-memory" role="tab" aria-selected="false" aria-controls="tab-memory" id="nav-memory" tabindex="0">
                     <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></span> Memory Bank
                 </span>
+                <span class="tab-btn" data-target="tab-history" role="tab" aria-selected="false" aria-controls="tab-history" id="nav-history" tabindex="0">
+                    <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span> Trade History
+                </span>
                 <span class="tab-btn" data-target="tab-settings" role="tab" aria-selected="false" aria-controls="tab-settings" id="nav-settings" tabindex="0">
                     <span class="icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings
                 </span>
@@ -466,6 +469,116 @@
                             <div class="spinner"></div>
                             <div class="empty-state-text">Loading vector database…</div>
                         </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Tab: Trade History (Binance) -->
+            <div id="tab-history" class="tab-content" role="tabpanel" aria-labelledby="nav-history">
+                <header class="tab-header">
+                    <h2>Trade History Analysis</h2>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <span id="hist-symbol-badge" class="market-hours-badge open" style="display:inline-flex;"></span>
+                        <span id="hist-method-badge" class="market-hours-badge" style="display:inline-flex;background:var(--accent-info,#3b82f6);color:#fff;"></span>
+                    </div>
+                </header>
+
+                <!-- Controls -->
+                <section class="panel" style="margin-bottom:16px;">
+                    <div class="panel-header" style="flex-wrap:wrap;gap:10px;">
+                        <h3>Parameters</h3>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                                Symbol
+                                <input id="history-symbol" type="text" value="BTC/USDT" class="settings-input" style="width:110px;" placeholder="BTC/USDT">
+                            </label>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                                Method
+                                <select id="history-method" class="settings-select">
+                                    <option value="fifo" selected>FIFO</option>
+                                    <option value="average">Average cost</option>
+                                </select>
+                            </label>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                                Period
+                                <select id="history-days" class="settings-select">
+                                    <option value="7">7 days</option>
+                                    <option value="30" selected>30 days</option>
+                                    <option value="90">90 days</option>
+                                    <option value="180">180 days</option>
+                                    <option value="all">All history</option>
+                                </select>
+                            </label>
+                            <button id="history-refresh" class="copy-btn" style="padding:6px 14px;">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Loading / Error -->
+                <div id="history-spinner" class="empty-state" style="display:none;"><div class="spinner"></div><p>Fetching fills from Binance…</p></div>
+                <div id="history-error" class="empty-state" style="display:none;color:var(--accent-danger,#f87171);"></div>
+
+                <!-- KPI row -->
+                <div class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));margin-bottom:16px;">
+                    <div class="kpi-card" id="hist-kpi-trades">
+                        <div class="label">Closed Trades</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                    <div class="kpi-card" id="hist-kpi-winrate">
+                        <div class="label">Win Rate</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                    <div class="kpi-card" id="hist-kpi-pnl">
+                        <div class="label">Realized PNL</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                    <div class="kpi-card" id="hist-kpi-latent">
+                        <div class="label">Latent PNL</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                    <div class="kpi-card" id="hist-kpi-fees">
+                        <div class="label">Total Fees</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                    <div class="kpi-card" id="hist-kpi-maxdd">
+                        <div class="label">Max Drawdown</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                    <div class="kpi-card" id="hist-kpi-best">
+                        <div class="label">Best / Worst</div>
+                        <div class="hist-kpi-value value">—</div>
+                        <div class="hist-kpi-sub sub-label"></div>
+                    </div>
+                </div>
+
+                <!-- Open positions (latent) -->
+                <section class="panel" style="margin-bottom:16px;">
+                    <div class="panel-header"><h3>Open Positions (Latent PNL)</h3></div>
+                    <div id="hist-open-legs" style="padding:12px;">
+                        <p class="hist-no-open" style="color:var(--text-muted);">No data yet — click Refresh.</p>
+                    </div>
+                </section>
+
+                <!-- Equity curve -->
+                <section class="panel" style="margin-bottom:16px;">
+                    <div class="panel-header"><h3>Cumulative Net PNL Curve</h3></div>
+                    <div id="hist-equity-chart" style="min-height:200px;padding:8px;"></div>
+                </section>
+
+                <!-- Trades table -->
+                <section class="panel">
+                    <div class="panel-header"><h3>Closed Trades</h3></div>
+                    <div id="hist-table-wrap" style="padding:12px;">
+                        <p class="hist-no-trades" style="color:var(--text-muted);">No data yet — click Refresh.</p>
                     </div>
                 </section>
             </div>

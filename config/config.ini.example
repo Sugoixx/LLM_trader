@@ -135,6 +135,11 @@ partial_targets = 0.5:0.5, 1.0:1.0
 # =============================================================================
 [fast_trading]
 min_interval_seconds = 900
+min_confidence = MEDIUM
+max_signal_age_seconds = 900
+min_rr_after_fees = 0.0
+timeframe = 5m
+ohlcv_limit = 260
 daily_loss_pct_limit = -3.0
 consecutive_loss_threshold = 3
 consecutive_loss_cooldown_seconds = 7200

@@ -28,7 +28,7 @@ class DataFetcher:
                 self.logger.error(
                     "Timeframe %s not supported by %s. Supported: %s",
                     timeframe,
-                    self.exchange.id,
+                    getattr(self.exchange, "id", "Unknown"),
                     ", ".join(exchange_timeframes.keys()),
                 )
                 return None
@@ -37,7 +37,7 @@ class DataFetcher:
                 self.logger.warning(
                     "Timeframe %s may not be supported by %s. Attempting fetch anyway...",
                     timeframe,
-                    self.exchange.id,
+                    getattr(self.exchange, "id", "Unknown"),
                 )
 
         if limit > 1000:
@@ -51,7 +51,7 @@ class DataFetcher:
         )
 
         if ohlcv is None or len(ohlcv) == 0:
-            self.logger.warning("No data returned for %s on %s", pair, self.exchange.id)
+            self.logger.warning("No data returned for %s on %s", pair, getattr(self.exchange, "id", "Unknown"))
             return None
 
         # Sanitize data: Replace None with np.nan for float64 conversion
@@ -241,14 +241,16 @@ class DataFetcher:
             return self._process_ticker_data(tickers)
 
         except Exception as e:
-            self.logger.error("Error fetching multiple tickers: %s", e)
+            exchange_id = getattr(self.exchange, "id", None) or "Unknown"
+            self.logger.error("Error fetching multiple tickers from %s: %s", exchange_id, e)
             return {}
 
     def _validate_exchange_support(self) -> bool:
         """Validate that the exchange supports the required operations."""
+        exchange_id = getattr(self.exchange, "id", None) or "Unknown"
         if not self.exchange.has.get("fetchTickers", False):
             self.logger.warning(
-                "Exchange %s does not support fetchTickers", self.exchange.id
+                "Exchange %s does not support fetchTickers", exchange_id
             )
             return False
         return True
@@ -475,7 +477,7 @@ class DataFetcher:
                 if "fetchOrderBook" not in self._logged_unsupported:
                     self._logged_unsupported.add("fetchOrderBook")
                     self.logger.debug(
-                        "Exchange %s does not support fetchOrderBook", self.exchange.id
+                        "Exchange %s does not support fetchOrderBook", getattr(self.exchange, "id", "Unknown")
                     )
                 return None
 
@@ -586,7 +588,7 @@ class DataFetcher:
                 if "fetchTrades" not in self._logged_unsupported:
                     self._logged_unsupported.add("fetchTrades")
                     self.logger.debug(
-                        "Exchange %s does not support fetchTrades", self.exchange.id
+                        "Exchange %s does not support fetchTrades", getattr(self.exchange, "id", "Unknown")
                     )
                 return None
 
@@ -674,8 +676,14 @@ class DataFetcher:
                     self._logged_unsupported.add("fetchFundingRate")
                     self.logger.debug(
                         "Exchange %s does not support fetchFundingRate",
-                        self.exchange.id,
+                        getattr(self.exchange, "id", "Unknown"),
                     )
+                return None
+
+            # Funding rates only apply to perpetual futures, not spot markets
+            # Spot pairs like BTC/USDT don't have funding rates
+            if "/" in pair and ":USDT" not in pair and ":USD" not in pair:
+                self.logger.debug("Funding rate not applicable to spot pair %s", pair)
                 return None
 
             funding = await self.exchange.fetch_funding_rate(pair)

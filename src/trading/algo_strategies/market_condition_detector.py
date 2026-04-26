@@ -139,6 +139,18 @@ class MarketConditionDetector:
         ma_slow = sma_numba(close, self.sma_slow)
         atr_arr = atr_numba(high, low, close, self.adx_period)
 
+        trend_direction = "NEUTRAL"
+        if (
+            len(ma_fast) > 0
+            and len(ma_slow) > 0
+            and not np.isnan(ma_fast[-1])
+            and not np.isnan(ma_slow[-1])
+        ):
+            if ma_fast[-1] > ma_slow[-1] and close[-1] >= ma_fast[-1]:
+                trend_direction = "BULLISH"
+            elif ma_fast[-1] < ma_slow[-1] and close[-1] <= ma_fast[-1]:
+                trend_direction = "BEARISH"
+
         adx_val = adx_arr[-1] if not np.isnan(adx_arr[-1]) else 20.0
         adx_trend = min(1.0, adx_val / 60.0)
 
@@ -191,6 +203,7 @@ class MarketConditionDetector:
             "volatility_regime": vol_regime,
             "adx": round(float(adx_val), 2),
             "trend_score": round(float(trend_score), 3),
+            "trend_direction": trend_direction,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -202,5 +215,6 @@ class MarketConditionDetector:
             "volatility_regime": "normal",
             "adx": 0.0,
             "trend_score": 0.0,
+            "trend_direction": "NEUTRAL",
             "timestamp": datetime.now().isoformat(),
         }

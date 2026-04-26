@@ -45,3 +45,59 @@
 .vector-table .positive { color: var(--accent-success); }
 .vector-table .negative { color: var(--accent-danger); }
 
+/* ── History Panel ──────────────────────────────────────────────────── */
+.hist-table-scroll { overflow-x: auto; }
+
+.hist-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    white-space: nowrap;
+}
+.hist-table th {
+    background-color: var(--bg-dark-3);
+    color: var(--accent-primary);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 500;
+    border-bottom: 2px solid var(--border-subtle);
+    position: sticky;
+    top: 0;
+}
+.hist-table td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+}
+.hist-table tr:hover { background-color: rgba(255,255,255,0.025); }
+
+.hist-win  { color: var(--accent-success); font-weight: 600; }
+.hist-loss { color: var(--accent-danger);  font-weight: 600; }
+
+.stat-positive { color: var(--accent-success); }
+.stat-negative { color: var(--accent-danger);  }
+
+.hist-dir-long  { color: var(--accent-success); font-weight: 600; }
+.hist-dir-short { color: var(--accent-danger);  font-weight: 600; }
+
+.hist-kpi-value { font-size: 1.3rem; font-weight: 700; line-height: 1.2; }
+.hist-kpi-sub   { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Open position cards */
+.hist-open-card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: var(--bg-dark-2, #111);
+    font-size: 13px;
+}
+.hist-open-sym  { font-weight: 700; color: var(--accent-primary); }
+.hist-open-dir  { font-weight: 600; padding: 2px 8px; border-radius: 4px;
+                  background: rgba(255,255,255,0.06); }
+.hist-open-detail { color: var(--text-muted); }
+

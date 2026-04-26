@@ -15,6 +15,7 @@ import { initSettingsPanel } from './modules/settings_panel.js?v=6.5';
 import { initAlgoPanel, updateAlgoData } from './modules/algo_panel.js?v=6.6';
 import { initSymbolPicker } from './modules/symbol_picker.js?v=6.6';
 import { initCapitalAlert } from './modules/capital_alert.js?v=6.7';
+import { initHistoryPanel, updateHistoryData } from './modules/history_panel.js?v=7';
 
 const state = {
     isConnected: false,
@@ -238,6 +239,7 @@ async function updateSlowLane() {
     await updateStatisticsData();
     await updateNewsData();
     await updateAlgoData();
+    await updateHistoryData();
 }
 
 // Initialize application
@@ -299,6 +301,7 @@ function initApp() {
     safeInit('CountdownLoop', startCountdownLoop);
     safeInit('SymbolPicker', initSymbolPicker);
     safeInit('CapitalAlert', initCapitalAlert);
+    safeInit('HistoryPanel', initHistoryPanel);
 
     // Initial update
     updateAll();

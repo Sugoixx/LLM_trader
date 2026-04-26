@@ -623,6 +623,11 @@ class Config:
         return int(self.get_config("safety", "consecutive_loss_cooldown_minutes", 60))
 
     @property
+    def AI_POST_TRADE_COOLDOWN_MINUTES(self):
+        """Minimum wait after any AI close before opening another AI entry."""
+        return int(self.get_config("safety", "post_trade_cooldown_minutes", 0))
+
+    @property
     def AI_MIN_RR_AFTER_FEES(self):
         """Minimum net reward/risk after round-trip fees (0 = disabled)."""
         return float(self.get_config("safety", "min_rr_after_fees", 1.2))
@@ -704,6 +709,31 @@ class Config:
         return int(
             self.get_config("fast_trading", "consecutive_loss_cooldown_seconds", 7200)
         )
+
+    @property
+    def FAST_MIN_CONFIDENCE(self):
+        """Minimum consensus confidence for new fast entries."""
+        return str(self.get_config("fast_trading", "min_confidence", "MEDIUM")).upper()
+
+    @property
+    def FAST_MIN_RR_AFTER_FEES(self):
+        """Minimum net reward/risk required for new fast entries."""
+        return float(self.get_config("fast_trading", "min_rr_after_fees", 0.0))
+
+    @property
+    def FAST_MAX_SIGNAL_AGE_SECONDS(self):
+        """Maximum age for cached algo signals before blocking new fast entries."""
+        return int(self.get_config("fast_trading", "max_signal_age_seconds", 900))
+
+    @property
+    def FAST_TIMEFRAME(self):
+        """OHLCV timeframe used by the independent fast-trading loop."""
+        return str(self.get_config("fast_trading", "timeframe", "5m"))
+
+    @property
+    def FAST_OHLCV_LIMIT(self):
+        """Number of OHLCV candles fetched by the independent fast loop."""
+        return int(self.get_config("fast_trading", "ohlcv_limit", 260))
 
     @property
     def FAST_POLL_INTERVAL_SECONDS(self):

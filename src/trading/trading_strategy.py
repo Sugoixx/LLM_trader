@@ -750,16 +750,36 @@ class TradingStrategy:
 
             # Block SELL signals in bullish trends - avoid selling in uptrend
             if signal == "SELL":
-                trend_dir = market_conditions.get("trend_direction", "NEUTRAL")
+                trend_dir = str(
+                    market_conditions.get("trend_direction", "NEUTRAL")
+                ).upper()
+                try:
+                    adx_value = float(market_conditions.get("adx") or 0.0)
+                except (TypeError, ValueError):
+                    adx_value = 0.0
                 if trend_dir == "BULLISH":
                     self.logger.warning(
                         "[SELL-BLOCKED] SELL signal in BULLISH trend (%s) — avoiding sell in uptrend.",
                         trend_dir,
                     )
                     return None
+                symbol_upper = str(symbol).upper()
+                oil_symbol = symbol_upper in {"CRUDOIL", "XTIUSD", "XBRUSD"} or (
+                    "OIL" in symbol_upper
+                )
+                if oil_symbol and (trend_dir != "BEARISH" or adx_value < 25.0):
+                    self.logger.warning(
+                        "[SELL-BLOCKED] Oil short requires BEARISH trend and ADX>=25 "
+                        "(trend=%s, ADX=%.1f). Treating as HOLD.",
+                        trend_dir,
+                        adx_value,
+                    )
+                    return None
 
             # Extract confluence factors for brain learning (Feature 1)
             confluence_factors = self._extract_confluence_factors(analysis_result)
+
+            _is_reversal_entry = False  # set True when close+open in same cycle
 
             # Handle existing position
             if self.current_position:
@@ -804,12 +824,14 @@ class TradingStrategy:
                         source=slot_source,
                     )
                     # Fall through to _open_new_position below (position dict
-                    # now empty for this slot).
+                    # now empty for this slot). Mark as reversal so confidence
+                    # gates are bypassed — we already committed to this direction.
+                    _is_reversal_entry = True
                 else:
                     self.logger.warning(
                         "[BUY-BLOCKED] Existing %s position on %s (slot=%s) \u2014 "
                         "routing %s signal to update/close logic instead of opening new entry. "
-                        "Enable double_trade_enabled=true in [live_trading] to allow a parallel slot.",
+                        "Enable double_trade_enabled=true in [safety] to allow a parallel slot.",
                         current_dir,
                         symbol,
                         getattr(self.current_position, "source", "?"),
@@ -838,7 +860,9 @@ class TradingStrategy:
                     )
                     return None
                 # Block MEDIUM if config min_confidence = HIGH or brain recommends
-                if confidence == "MEDIUM":
+                # Skip this gate for reversal entries — the SHORT was already closed,
+                # blocking here would leave the bot incorrectly flat.
+                if confidence == "MEDIUM" and not _is_reversal_entry:
                     min_conf = (
                         getattr(self.config, "AI_MIN_CONFIDENCE", "MEDIUM")
                     ).upper()
@@ -878,6 +902,7 @@ class TradingStrategy:
                     rating=rating,
                     debate_result=debate_result,
                     source="ai",
+                    is_reversal=_is_reversal_entry,
                 )
 
             # LLM asked to UPDATE/CLOSE an existing position but no slot is
@@ -1149,10 +1174,12 @@ class TradingStrategy:
         rating: str = "",
         debate_result=None,
         source: str = "ai",
+        is_reversal: bool = False,
     ) -> TradeDecision:
         """Open a new trading position with dynamic parameter calculation."""
         direction = "LONG" if signal == "BUY" else "SHORT"
-        market_conditions = market_conditions or {}
+        market_conditions = dict(market_conditions or {})
+        market_conditions.setdefault("symbol", symbol)
 
         # ── Multi-slot / DOUBLE_TRADE gate ────────────────────────────────
         # If another slot already has a position and DOUBLE_TRADE is off,
@@ -1172,7 +1199,7 @@ class TradingStrategy:
             self.logger.warning(
                 "[BUY-BLOCKED] [%s] double_trade_enabled=false and another slot is open (%s). "
                 "Refusing new open for source '%s'. "
-                "Enable double_trade_enabled=true in [live_trading] to allow a parallel slot.",
+                "Enable double_trade_enabled=true in [safety] to allow a parallel slot.",
                 source.upper(),
                 other_sources,
                 source,
@@ -1180,7 +1207,9 @@ class TradingStrategy:
             return None
 
         # ── AI Safety Gates (source='ai' only — fast has its own guards) ──
-        if source == "ai":
+        # Bypass all gates for reversal entries: the old position was already
+        # closed; blocking here would leave the bot incorrectly flat.
+        if source == "ai" and not is_reversal:
             blocked_reason = self._check_ai_safety_gates(
                 confidence=confidence,
                 stop_loss=stop_loss,
@@ -1341,6 +1370,25 @@ class TradingStrategy:
             tp_distance_pct * 100,
             rr_ratio,
         )
+
+        if source == "fast":
+            min_rr = float(getattr(self.config, "FAST_MIN_RR_AFTER_FEES", 0.0) or 0.0)
+            if min_rr > 0:
+                rr_reason = self._check_min_rr_after_fees(
+                    stop_loss=final_sl,
+                    take_profit=final_tp,
+                    current_price=current_price,
+                    signal=signal,
+                    min_rr=min_rr,
+                )
+                if rr_reason:
+                    self.logger.warning(
+                        "[BUY-BLOCKED] [FAST] %s on %s — %s",
+                        signal,
+                        symbol,
+                        rr_reason.replace("[ai_safety]", "[fast_trading]"),
+                    )
+                    return None
 
         # Create position using Factory
         new_position = self.position_factory.create_position(
@@ -1875,9 +1923,37 @@ class TradingStrategy:
                     conditions["volume_state"] = vol_data.get("state", "NORMAL")
 
                 # Extract ATR for dynamic SL/TP calculation
-                conditions["atr"] = tech_data.get("atr", 0)
+                atr_value = tech_data.get("atr", 0)
+                if atr_value:
+                    if isinstance(atr_value, dict):
+                        # Handle dict type (from 2D arrays)
+                        atr_value = next(iter(atr_value.values()), None) if atr_value else 0.0
+                    if hasattr(atr_value, '__iter__') and not isinstance(atr_value, (int, float)):
+                        # It's an array/list, get the last valid value
+                        try:
+                            import numpy as np
+                            val = atr_value[-1] if hasattr(atr_value, '__getitem__') else atr_value
+                            atr_value = float(np.nan_to_num(val)) if not np.isnan(val) else 0.0
+                        except (IndexError, TypeError, ValueError):
+                            atr_value = 0.0
+                    conditions["atr"] = float(atr_value) if atr_value else 0.0
+                else:
+                    conditions["atr"] = 0.0
+
                 atr_pct = tech_data.get("atr_percentage", 0)
-                conditions["atr_percentage"] = atr_pct
+                if atr_pct:
+                    if isinstance(atr_pct, dict):
+                        atr_pct = next(iter(atr_pct.values()), None) if atr_pct else 0.0
+                    if hasattr(atr_pct, '__iter__') and not isinstance(atr_pct, (int, float)):
+                        try:
+                            import numpy as np
+                            val = atr_pct[-1] if hasattr(atr_pct, '__getitem__') else atr_pct
+                            atr_pct = float(np.nan_to_num(val)) if not np.isnan(val) else 0.0
+                        except (IndexError, TypeError, ValueError):
+                            atr_pct = 0.0
+                    conditions["atr_percentage"] = float(atr_pct) if atr_pct else 0.0
+                else:
+                    conditions["atr_percentage"] = 0.0
                 # Determine volatility from ATR or other indicators
                 if atr_pct > 3:
                     conditions["volatility"] = "HIGH"
@@ -2162,7 +2238,16 @@ class TradingStrategy:
             if block_reason:
                 return block_reason
 
-        # Gate 3 — Min RR after fees -----------------------------------------
+        # Gate 2.5 - Post-trade cooldown -------------------------------------
+        post_trade_cooldown_min = int(
+            getattr(self.config, "AI_POST_TRADE_COOLDOWN_MINUTES", 0)
+        )
+        if post_trade_cooldown_min > 0:
+            block_reason = self._check_post_trade_cooldown(post_trade_cooldown_min)
+            if block_reason:
+                return block_reason
+
+        # Gate 3 - Min RR after fees -----------------------------------------
         min_rr = float(getattr(self.config, "AI_MIN_RR_AFTER_FEES", 0.0))
         if min_rr > 0 and stop_loss and take_profit and current_price > 0:
             rr_reason = self._check_min_rr_after_fees(
@@ -2228,6 +2313,49 @@ class TradingStrategy:
             f"consecutive-loss cooldown active: {streak} losses in a row, "
             f"{remaining_min}min remaining "
             f"(config [ai_safety].consecutive_loss_threshold={threshold})"
+        )
+
+    def _check_post_trade_cooldown(self, cooldown_min: int) -> Optional[str]:
+        """Block if the latest AI close is still inside its cooldown window."""
+        try:
+            history = self.persistence.load_trade_history() or []
+        except Exception as e:
+            self.logger.debug("Safety gate: failed to load history: %s", e)
+            return None
+
+        last_close_ts: Optional[datetime] = None
+        for row in reversed(history):
+            action = row.get("action", "")
+            if action not in self._CLOSE_ACTIONS:
+                continue
+            source = row.get("source") or "ai"
+            if str(source).lower() == "fast":
+                continue
+            ts_str = row.get("timestamp")
+            if not ts_str:
+                continue
+            try:
+                ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                last_close_ts = (
+                    ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+                )
+                break
+            except (ValueError, TypeError):
+                continue
+
+        if last_close_ts is None:
+            return None
+
+        cooldown_until = last_close_ts + timedelta(minutes=cooldown_min)
+        now = datetime.now(timezone.utc)
+        if now >= cooldown_until:
+            return None
+
+        remaining_min = int((cooldown_until - now).total_seconds() / 60)
+        return (
+            f"post-trade cooldown active after latest AI close: "
+            f"{remaining_min}min remaining "
+            f"(config [ai_safety].post_trade_cooldown_minutes={cooldown_min})"
         )
 
     def _check_min_rr_after_fees(

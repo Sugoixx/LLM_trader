@@ -686,27 +686,26 @@ class AnalysisEngine:
         for key, values in indicators.items():
             try:
                 # Handle different types of NumPy array returns based on shape
-                if values is None or np.isnan(values).all():
+                if values is None or (isinstance(values, np.ndarray) and np.isnan(values).all()):
                     continue
 
                 # Check if it's a standard 1D array (most indicators)
                 if isinstance(values, np.ndarray) and values.ndim == 1:
                     technical_data[key] = float(values[-1])
 
-                # Handle 2D arrays - common for indicators that return multiple series like vortex_indicator
+                # Handle 2D arrays - take the last row's first element (main indicator value)
                 elif isinstance(values, np.ndarray) and values.ndim > 1:
-                    # For 2D array, take the last value from each series
-                    technical_data[key] = [float(values[i, -1]) for i in range(values.shape[0])]
+                    technical_data[key] = float(values[-1, 0]) if values.shape[1] > 0 else float(values[-1])
 
                 # Handle tuples - common return type from indicator functions (e.g., MACD, support_resistance)
                 elif isinstance(values, tuple) and all(isinstance(item, np.ndarray) for item in values):
-                    # For tuple of arrays, store as list of last values
-                    technical_data[key] = [float(array[-1]) for array in values]
+                    # For tuple of arrays, store as dict with index
+                    technical_data[key] = {i: float(array[-1]) for i, array in enumerate(values)}
 
                 # Handle lists - could be lists of arrays or scalar values
                 elif isinstance(values, list):
                     if all(isinstance(item, np.ndarray) for item in values):
-                        technical_data[key] = [float(array[-1]) for array in values]
+                        technical_data[key] = {i: float(array[-1]) for i, array in enumerate(values)}
                     else:
                         technical_data[key] = values
 

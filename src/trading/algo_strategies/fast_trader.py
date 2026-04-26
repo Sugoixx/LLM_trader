@@ -59,14 +59,13 @@ class AlgoFastTrader:
         Returns:
             Tuple ``(signal, confidence, reasoning)``.
         """
-        # Include LLM signal if provided
-        if llm_signal:
-            signals = signals + [{"strategy_name": "LLM", "signal": llm_signal}]
-
+        _ = llm_signal  # LLM corrections are applied outside entry consensus.
         if not signals:
             return "HOLD", "LOW", "Fast trader: no signals available"
 
-        regime, vol, adx = self._extract_regime(market_condition)
+        regime, vol, adx, instrument_type, trend_direction = self._extract_regime(
+            market_condition
+        )
 
         # ─── Regime quality gate ──────────────────────────────────────────
         block = self._check_regime_quality(regime, vol, adx)
@@ -121,6 +120,18 @@ class AlgoFastTrader:
             )
 
         # ─── Confidence mapping ──────────────────────────────────────────
+        if (
+            consensus == "SELL"
+            and instrument_type == "CRUDOIL"
+            and (trend_direction != "BEARISH" or adx < self.MIN_ADX_FOR_TREND)
+        ):
+            return (
+                "HOLD",
+                "LOW",
+                "Fast trader: CRUDOIL short blocked "
+                f"(trend_direction={trend_direction}, ADX={adx:.1f})",
+            )
+
         if n_agree == n_total:
             confidence = "HIGH"
         elif n_agree >= math.ceil(n_total * 0.67):
@@ -133,26 +144,30 @@ class AlgoFastTrader:
             confidence = self._degrade_confidence(confidence)
 
         agreeing_names = ", ".join(s.get("strategy_name", "?") for s in agreeing)
-        llm_note = " (incl. LLM)" if llm_signal else ""
         reasoning = (
             f"[Fast] {n_agree}/{n_total} eligible agree {consensus} "
-            f"[{agreeing_names}] | regime={regime} vol={vol} ADX={adx:.1f}{llm_note}"
+            f"[{agreeing_names}] | regime={regime} direction={trend_direction} "
+            f"vol={vol} ADX={adx:.1f}"
         )
         return consensus, confidence, reasoning
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def _extract_regime(mc: Optional[Dict[str, Any]]) -> Tuple[str, str, float]:
+    def _extract_regime(
+        mc: Optional[Dict[str, Any]]
+    ) -> Tuple[str, str, float, str, str]:
         if not isinstance(mc, dict):
-            return "UNKNOWN", "NORMAL", 0.0
+            return "UNKNOWN", "NORMAL", 0.0, "UNKNOWN", "NEUTRAL"
         regime = str(mc.get("market_condition", "unknown")).upper()
         vol = str(mc.get("volatility_regime", "normal")).upper()
+        instrument_type = str(mc.get("instrument_type", "UNKNOWN")).upper()
+        trend_direction = str(mc.get("trend_direction", "NEUTRAL")).upper()
         try:
             adx = float(mc.get("adx", 0.0) or 0.0)
         except (TypeError, ValueError):
             adx = 0.0
-        return regime, vol, adx
+        return regime, vol, adx, instrument_type, trend_direction
 
     def _check_regime_quality(self, regime: str, vol: str, adx: float) -> Optional[str]:
         """Return a blocking reason if regime is too low-quality."""

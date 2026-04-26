@@ -71,8 +71,9 @@ class RiskManager(RiskManagerProtocol):
             volatility_level = "MEDIUM"
 
         # 2. Dynamic SL/TP Calculation (Dynamic Defaults)
-        # Use 2x ATR for SL, 4x ATR for TP (2:1 R/R default)
-        dynamic_sl_distance = atr * 2
+        # Use configurable ATR multiplier for SL (default 2.0), 4x ATR for TP (2:1 R/R default)
+        sl_multiplier = float(self.config.get_config("safety", "initial_sl_atr_multiplier", 2.0))
+        dynamic_sl_distance = atr * sl_multiplier
         dynamic_tp_distance = atr * 4
 
         if direction == "LONG":
@@ -84,8 +85,18 @@ class RiskManager(RiskManagerProtocol):
 
         # 3. Resolve Final SL/TP (AI vs Dynamic)
         if stop_loss and stop_loss > 0:
-            final_sl = stop_loss
-            self.logger.debug("Using AI-provided SL: $%s", f"{final_sl:,.2f}")
+            # Validate AI SL: must be at least 1.5x ATR from current price
+            ai_sl_distance = abs(current_price - stop_loss) / current_price
+            min_acceptable_sl = (atr * 1.5) / current_price  # 1.5x ATR minimum
+            if ai_sl_distance < min_acceptable_sl:
+                self.logger.warning(
+                    "AI SL distance %.1f%% too small (1.5x ATR = %.1f%%), using dynamic SL",
+                    ai_sl_distance * 100, min_acceptable_sl * 100
+                )
+                final_sl = dynamic_sl
+            else:
+                final_sl = stop_loss
+                self.logger.debug("Using AI-provided SL: $%s", f"{final_sl:,.2f}")
         else:
             final_sl = dynamic_sl
             self.logger.info("Using dynamic SL (2x ATR): $%s", f"{final_sl:,.2f}")

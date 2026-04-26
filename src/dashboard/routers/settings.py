@@ -71,6 +71,12 @@ ALLOWED_SETTINGS = {
     "live_trading.max_order_usd_fast",
     "live_trading.double_trade_enabled",
     "live_trading.confirm_orders",
+    "fast_trading.min_interval_seconds",
+    "fast_trading.min_confidence",
+    "fast_trading.max_signal_age_seconds",
+    "fast_trading.min_rr_after_fees",
+    "fast_trading.poll_interval_seconds",
+    "fast_trading.block_minutes_before_close",
     "model_config.temperature",
     "model_config.max_tokens",
 }
@@ -155,6 +161,13 @@ class SettingsRouter:
                 getattr(self.config, "DOUBLE_TRADE_ENABLED", False)
             ),
             "live_trading.confirm_orders": self.config.LIVE_CONFIRM_ORDERS,
+            # Fast trading
+            "fast_trading.min_interval_seconds": self.config.FAST_MIN_INTERVAL_SECONDS,
+            "fast_trading.min_confidence": self.config.FAST_MIN_CONFIDENCE,
+            "fast_trading.max_signal_age_seconds": self.config.FAST_MAX_SIGNAL_AGE_SECONDS,
+            "fast_trading.min_rr_after_fees": self.config.FAST_MIN_RR_AFTER_FEES,
+            "fast_trading.poll_interval_seconds": self.config.FAST_POLL_INTERVAL_SECONDS,
+            "fast_trading.block_minutes_before_close": self.config.FAST_BLOCK_MINUTES_BEFORE_CLOSE,
             # Model
             "model_config.temperature": self.config.get_config('model_config', 'temperature', 0.7),
             "model_config.max_tokens": self.config.get_config('model_config', 'max_tokens', 32768),
@@ -205,6 +218,39 @@ class SettingsRouter:
                     return "Cooldown must be between 0 and 120 minutes"
             except (ValueError, TypeError):
                 return "Cooldown must be an integer"
+
+        if key in (
+            "fast_trading.min_interval_seconds",
+            "fast_trading.max_signal_age_seconds",
+            "fast_trading.poll_interval_seconds",
+        ):
+            try:
+                value = int(value)
+                if not 0 <= value <= 86400:
+                    return "Fast trading seconds value must be between 0 and 86400"
+            except (ValueError, TypeError):
+                return "Fast trading seconds value must be an integer"
+
+        if key == "fast_trading.block_minutes_before_close":
+            try:
+                value = int(value)
+                if not 0 <= value <= 1440:
+                    return "Fast close-block window must be between 0 and 1440 minutes"
+            except (ValueError, TypeError):
+                return "Fast close-block window must be an integer"
+
+        if key == "fast_trading.min_rr_after_fees":
+            try:
+                value = float(value)
+                if not 0.0 <= value <= 10.0:
+                    return "Fast min RR after fees must be between 0.0 and 10.0"
+            except (ValueError, TypeError):
+                return "Fast min RR after fees must be a number"
+
+        if key == "fast_trading.min_confidence":
+            value = str(value).upper()
+            if value not in ("LOW", "MEDIUM", "HIGH"):
+                return "Fast min confidence must be LOW, MEDIUM, or HIGH"
 
         if key == "model_config.temperature":
             try:
